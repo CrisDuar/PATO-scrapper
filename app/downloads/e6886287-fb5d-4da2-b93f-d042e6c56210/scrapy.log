@@ -1,0 +1,15 @@
+2026-08-21 23:43:37 [scrapy.utils.log] INFO: Scrapy 2.18.0 started (bot: scrapybot)
+2026-08-21 23:43:37 [scrapy.utils.log] INFO: Versions:
+{'lxml': '6.1.2',
+ 'libxml2': '2.11.9',
+ 'cssselect': '1.5.0',
+ 'parsel': '1.11.0',
+ 'w3lib': '2.4.1',
+ 'Twisted': '26.4.0',
+ 'Python': '3.14.7 (tags/v3.14.7:823f032, Aug  5 2026, 10:51:32) [MSC v.1944 '
+           '64 bit (AMD64)]',
+ 'pyOpenSSL': '26.4.0 (OpenSSL 4.0.1 9 Jun 2026)',
+ 'cryptography': '50.0.0',
+ 'Platform': 'Windows-11-10.0.26200-SP0'}
+2026-08-21 23:43:37 [scrapy.crawler] DEBUG: Using AsyncCrawlerProcess
+2026-08-21 23:43:37 [asyncio] DEBUG: Using selector: SelectSelector
