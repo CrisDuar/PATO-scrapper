@@ -1,0 +1,25 @@
+# Entorno
+.env
+.venv/
+venv/
+env/
+
+# Python
+__pycache__/
+*.py[cod]
+
+# Scrapy
+.scrapy/
+
+# Descargas
+downloads/
+
+# Logs
+*.log
+
+# IDE
+.vscode/
+.idea/
+
+# Windows
+Thumbs.db
