@@ -34,6 +34,8 @@ from app.config import (
     FILE_EXTENSIONS,
 )
 
+from app.cleaner.clean_job import clean_job_files
+
 
 
 
@@ -581,6 +583,80 @@ def get_job_log(
 
     return "\n\n".join(parts)
 
+
+
+@app.post("/jobs/{job_id}/clean")
+def clean_job(
+    job_id: str,
+):
+
+    job_dir = (
+        DOWNLOADS_DIR
+        / job_id
+    )
+
+    if not job_dir.exists():
+
+        raise HTTPException(
+            status_code=404,
+            detail="Job no encontrado.",
+        )
+
+    try:
+        result = clean_job_files(job_dir)
+
+    except FileNotFoundError as exc:
+
+        raise HTTPException(
+            status_code=404,
+            detail=str(exc),
+        )
+
+    if not result["archivos_procesados"]:
+
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                "No se encontraron archivos tabulares "
+                "(.xlsx, .xls, .csv) para limpiar en este job."
+            ),
+        )
+
+    return {
+        "job_id": job_id,
+        **result,
+    }
+
+
+@app.get("/jobs/{job_id}/clean/download")
+def download_clean_job(
+    job_id: str,
+):
+
+    job_dir = (
+        DOWNLOADS_DIR
+        / job_id
+    )
+
+    output_path = (
+        job_dir
+        / "datos_limpios.xlsx"
+    )
+
+    if not output_path.exists():
+
+        raise HTTPException(
+            status_code=404,
+            detail=(
+                "Aún no se ha generado 'datos_limpios.xlsx'. "
+                f"Ejecuta primero POST /jobs/{job_id}/clean."
+            ),
+        )
+
+    return FileResponse(
+        str(output_path),
+        filename=output_path.name,
+    )
 
 
 @app.get("/health")
