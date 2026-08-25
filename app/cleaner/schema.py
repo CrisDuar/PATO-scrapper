@@ -159,7 +159,25 @@ DASHBOARD_02_HOGARES = TableSpec(
         "pobre",
     ),
     required_header_keys=("anio", "region", "departamento", "ipm", "pobre"),
-    header_key_aliases={},
+    header_key_aliases={
+        "ano": "anio",
+        "personas_que_habitan_ese_hogar": "personas_hogar",
+        "privacion_por_bajo_logro_educativo": "priv_bajo_logro_educativo",
+        "privacion_por_analfabetismo": "priv_analfabetismo",
+        "privacion_por_inasistencia_escolar": "priv_inasistencia_escolar",
+        "privacion_por_rezago_escolar": "priv_rezago_escolar",
+        "privacion_por_atencion_integral_a_la_primera_infancia": "priv_atencion_primera_infancia",
+        "privacion_por_trabajo_infantil": "priv_trabajo_infantil",
+        "privacion_por_no_aseguramiento_en_salud": "priv_no_aseguramiento_salud",
+        "privacion_por_barreras_de_acceso_a_salud": "priv_barreras_acceso_salud",
+        "privacion_por_desempleo_de_larga_duracion": "priv_desempleo_larga_duracion",
+        "privacion_por_tasa_de_empleo_formal": "priv_tasa_empleo_formal",
+        "privacion_por_no_acceso_a_fuente_de_agua_mejorada": "priv_no_acceso_agua_mejorada",
+        "privacion_por_inadecuada_eliminacion_de_excretas": "priv_inadecuada_eliminacion_excretas",
+        "privacion_por_inadecuado_material_de_pisos": "priv_material_inadecuado_pisos",
+        "privacion_por_inadecuado_material_de_paredes_exteriores": "priv_material_inadecuado_paredes",
+        "privacion_por_hacinamiento_critico": "priv_hacinamiento_critico",
+    },
 )
 
 
@@ -174,7 +192,7 @@ CONTRIBUCION_RELATIVA_PRIVACIONES = TableSpec(
     ),
     natural_key=("anio", "privacion", "pais"),
     required_header_keys=("anio", "privacion", "pais", "valor_porcentaje"),
-    header_key_aliases={"valor": "valor_porcentaje"},
+    header_key_aliases={"ano": "anio", "valor": "valor_porcentaje"},
 )
 
 POBLACION_POBREZA_MULTIDIMENSIONAL = TableSpec(
@@ -195,7 +213,7 @@ POBLACION_POBREZA_MULTIDIMENSIONAL = TableSpec(
         "tipo_medida",
         "valor_porcentaje",
     ),
-    header_key_aliases={"valor": "valor_porcentaje"},
+    header_key_aliases={"ano": "anio", "valor": "valor_porcentaje"},
 )
 
 

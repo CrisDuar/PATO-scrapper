@@ -312,9 +312,9 @@ Bloques que no calzan con ninguna sub-tabla quedan en `sin_clasificar.csv` (tít
 | `contribuciones_incidencia` | 01 | `anio, dominio, dimension, porcentaje` | ✅ Verificado con datos reales del DANE |
 | `incidencia_por_sexo_persona` | 01 | `anio, dominio, sexo, porcentaje` | ✅ Verificado con datos reales del DANE (requirió soporte de celdas combinadas en `block_extractor.py`) |
 | `incidencia_por_sexo_jefe_hogar` | 01 | `anio, dominio, sexo, porcentaje` | ✅ Verificado con datos reales del DANE |
-| `dashboard_02` | 02 | `anio, region, departamento, personas_hogar, priv_*, ipm, pobre` | ⏳ Pendiente — probablemente requiere una fuente de microdatos por hogar (encuesta/censo) distinta a los anexos agregados que el scraper descarga hoy |
-| `contribucion_relativa_privaciones` | 03 | `anio, privacion, pais, valor_porcentaje` | ⏳ Pendiente — requiere el anexo Latinoamérica del DANE, no probado aún |
-| `poblacion_pobreza_multidimensional` | 03 | `anio, area_geografica, pais, tipo_medida, valor_porcentaje` | ⏳ Pendiente — mismo motivo que la anterior |
+| `dashboard_02` | 02 | `anio, region, departamento, personas_hogar, priv_*, ipm, pobre` | ⏳ Esquema y mapeo de columnas listos (`Pobreza Multidimensional Hogares Departamental`); se llenará automáticamente cuando el scraper encuentre y descargue esa fuente de microdatos por hogar |
+| `contribucion_relativa_privaciones` | 03 | `anio, privacion, pais, valor_porcentaje` | ⏳ Esquema listo — requiere el anexo Latinoamérica del DANE, aún no encontrado por el scraper |
+| `poblacion_pobreza_multidimensional` | 03 | `anio, area_geografica, pais, tipo_medida, valor_porcentaje` | ⏳ Esquema listo — mismo motivo que la anterior |
 
 **Carga a PostgreSQL** (`db.py`, `loader.py`, `ddl.sql`): cuando `DATABASE_URL` esté configurada en `.env`, `POST /jobs/{job_id}/clean/load` inserta cada sub-tabla con `UPSERT` idempotente (`ON CONFLICT ... DO UPDATE`) sobre su clave natural, por lo que reejecutar la carga no duplica filas. El DDL de referencia está en [ddl.sql](app/cleaner/ddl.sql).
 

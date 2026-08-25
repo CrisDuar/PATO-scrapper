@@ -266,7 +266,46 @@ def _dedupe_rows(rows: list[dict], spec: TableSpec) -> list[dict]:
 
         deduped.append(row)
 
+    sort_fields = _sort_order(spec.natural_key)
+
+    deduped.sort(
+        key=lambda row: tuple(
+            _sort_key(row.get(field)) for field in sort_fields
+        )
+    )
+
     return deduped
+
+
+def _sort_order(natural_key: tuple[str, ...]) -> tuple[str, ...]:
+    """
+    Orden de presentación de filas: agrupa primero por las columnas
+    de categoría (dominio, país, sexo, variable...) y deja 'anio' al
+    final, para que el CSV/Excel lea como una serie de tiempo por
+    grupo en vez de intercalar años entre grupos distintos.
+    """
+
+    return tuple(
+        field for field in natural_key if field != "anio"
+    ) + tuple(
+        field for field in natural_key if field == "anio"
+    )
+
+
+def _sort_key(value):
+    """
+    Clave de orden segura para valores mixtos (int/float/str/None):
+    agrupa por tipo antes que por valor, para que comparar no falle
+    con TypeError cuando una columna mezcla números y texto.
+    """
+
+    if value is None:
+        return (0, "")
+
+    if isinstance(value, (int, float)):
+        return (1, value)
+
+    return (2, str(value))
 
 
 def map_blocks(blocks: list[DataBlock]) -> dict[str, list[dict]]:
