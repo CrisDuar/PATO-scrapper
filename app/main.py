@@ -35,6 +35,7 @@ from app.config import (
 )
 
 from app.cleaner.clean_job import clean_job_files
+from app.cleaner.loader import load_tables_from_dir
 
 
 
@@ -628,18 +629,61 @@ def clean_job(
     }
 
 
-@app.get("/jobs/{job_id}/clean/download")
-def download_clean_job(
+@app.post("/jobs/{job_id}/clean/load")
+def load_clean_job(
     job_id: str,
 ):
+    """
+    Carga a PostgreSQL las sub-tablas ya limpiadas de este job
+    (ejecutar POST /jobs/{job_id}/clean primero). Requiere que
+    DATABASE_URL esté configurada en el .env.
+    """
 
-    job_dir = (
+    clean_dir = (
         DOWNLOADS_DIR
         / job_id
+        / "datos_limpios"
     )
 
+    if not clean_dir.exists():
+
+        raise HTTPException(
+            status_code=404,
+            detail=(
+                "Aún no se ha generado la limpieza de este job. "
+                f"Ejecuta primero POST /jobs/{job_id}/clean."
+            ),
+        )
+
+    try:
+        report = load_tables_from_dir(clean_dir)
+
+    except RuntimeError as exc:
+
+        raise HTTPException(
+            status_code=503,
+            detail=str(exc),
+        )
+
+    return {
+        "job_id": job_id,
+        "reporte": report,
+    }
+
+
+@app.get("/jobs/{job_id}/clean/download")
+def download_clean_excel(
+    job_id: str,
+):
+    """
+    Descarga el Excel consolidado (datos_limpios.xlsx, una hoja por
+    sub-tabla) generado por POST /jobs/{job_id}/clean.
+    """
+
     output_path = (
-        job_dir
+        DOWNLOADS_DIR
+        / job_id
+        / "datos_limpios"
         / "datos_limpios.xlsx"
     )
 
@@ -650,6 +694,41 @@ def download_clean_job(
             detail=(
                 "Aún no se ha generado 'datos_limpios.xlsx'. "
                 f"Ejecuta primero POST /jobs/{job_id}/clean."
+            ),
+        )
+
+    return FileResponse(
+        str(output_path),
+        filename=output_path.name,
+    )
+
+
+@app.get("/jobs/{job_id}/clean/download/{table_name}")
+def download_clean_table(
+    job_id: str,
+    table_name: str,
+):
+
+    job_dir = (
+        DOWNLOADS_DIR
+        / job_id
+    )
+
+    output_path = (
+        job_dir
+        / "datos_limpios"
+        / f"{table_name}.csv"
+    )
+
+    if not output_path.exists():
+
+        raise HTTPException(
+            status_code=404,
+            detail=(
+                f"No existe la tabla '{table_name}' para este job. "
+                f"Ejecuta primero POST /jobs/{job_id}/clean y revisa "
+                "'archivos_salida' en la respuesta para ver las "
+                "tablas disponibles."
             ),
         )
 

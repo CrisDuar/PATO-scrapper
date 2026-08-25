@@ -10,6 +10,8 @@ Le das una o varias URLs de partida (por ejemplo el sitio del DANE) y el sistema
 3. Descarga los archivos (PDF, Excel, CSV, ZIP, etc.) que encuentre relacionados con esa temática.
 4. Expone todo el proceso como *jobs* asíncronos vía API REST.
 
+Además, incluye un **módulo de limpieza de datos** que toma los archivos tabulares (`.xlsx`, `.xls`, `.csv`) descargados por un job, extrae las tablas que contienen, normaliza encabezados y valores, y exporta un libro de trabajo consolidado siguiendo el formato estándar definido en `Formato de Datos.xlsx`.
+
 
 
 ## Tabla de contenido
@@ -20,6 +22,7 @@ Le das una o varias URLs de partida (por ejemplo el sitio del DANE) y el sistema
 - [Ejecutar el servidor](#ejecutar-el-servidor)
 - [Estructura del proyecto](#estructura-del-proyecto)
 - [Endpoints de la API](#endpoints-de-la-api)
+- [Módulo de limpieza de datos](#módulo-de-limpieza-de-datos)
 - [Uso con Postman](#uso-con-postman)
 - [Notas y buenas prácticas](#notas-y-buenas-prácticas)
 
@@ -38,6 +41,9 @@ uvicorn
 scrapy
 pydantic
 python-dotenv
+openpyxl
+pandas
+psycopg2-binary
 ```
 
 ## Instalación
@@ -69,6 +75,7 @@ Todas las variables son opcionales; si no existen, se usan los valores por defec
 | `DOWNLOADS_DIR` | `downloads` | Carpeta donde se guardan los archivos descargados |
 | `FILE_EXTENSIONS` | `.pdf,.xlsx,.xls,.csv,.zip,.rar,.7z,.json,.xml,.txt,.doc,.docx` | Extensiones consideradas "archivo descargable" |
 | `DISCOVERY_KEYWORDS` | `datos,estadisticas,indicadores,...` | Palabras que suman puntos a páginas/enlaces de portales estadísticos |
+| `DATABASE_URL` | *(vacío)* | Cadena de conexión a PostgreSQL (`postgresql://usuario:password@host:puerto/bd`). Solo requerida para `POST /jobs/{job_id}/clean/load`. |
 
 Ejemplo de `.env`:
 
@@ -97,17 +104,29 @@ La documentación interactiva de FastAPI queda disponible en:
 ```
 app/
 ├── config.py                     # Configuración centralizada (.env)
-├── main.py                       # API FastAPI: crear/consultar/descargar jobs
-└── scraper/
-    ├── ipm_spider.py             # Spider de Scrapy (lógica de rastreo)
-    ├── crawler/
-    │   ├── url_utils.py          # Normalización de URLs, dominios, nombres de archivo
-    │   ├── link_scorer.py        # Puntaje de relevancia de enlaces
-    │   ├── page_classifier.py    # Puntaje de relevancia de páginas
-    │   └── file_scorer.py        # Puntaje de relevancia de archivos encontrados
-    └── pipelines/
-        └── files_pipeline.py     # Descarga de archivos conservando su nombre original
+├── main.py                       # API FastAPI: crear/consultar/descargar jobs, limpieza de datos
+├── scraper/
+│   ├── ipm_spider.py             # Spider de Scrapy (lógica de rastreo)
+│   ├── crawler/
+│   │   ├── url_utils.py          # Normalización de URLs, dominios, nombres de archivo
+│   │   ├── link_scorer.py        # Puntaje de relevancia de enlaces
+│   │   ├── page_classifier.py    # Puntaje de relevancia de páginas
+│   │   └── file_scorer.py        # Puntaje de relevancia de archivos encontrados
+│   └── pipelines/
+│       └── files_pipeline.py     # Descarga de archivos conservando su nombre original
+└── cleaner/
+    ├── clean_job.py              # Orquesta la limpieza de todos los archivos de un job
+    ├── block_extractor.py        # Extrae bloques de tablas desde CSV/XLS/XLSX (incluye despivote ancho→largo)
+    ├── normalizer.py             # Normaliza encabezados y valores de los bloques
+    ├── schema.py                 # Definición declarativa de las sub-tablas del esquema objetivo
+    ├── table_mapper.py           # Clasifica bloques en sub-tablas y mapea sus columnas
+    ├── exporter.py                # Exporta cada sub-tabla como CSV y a un Excel consolidado
+    ├── db.py                     # Conexión a PostgreSQL y UPSERT idempotente
+    ├── loader.py                 # Carga los CSV de un job a PostgreSQL
+    ├── ddl.sql                   # DDL de referencia para las tablas en PostgreSQL
+    └── text_utils.py             # Utilidades de texto compartidas
 run.py                            # Punto de entrada (uvicorn)
+Formato de Datos.xlsx             # Plantilla/layout de referencia para el esquema de salida
 downloads/                        # Carpeta de salida (un subdirectorio por job_id)
 ```
 
@@ -115,6 +134,7 @@ Cada job crea una carpeta `downloads/<job_id>/` con:
 - Los archivos descargados.
 - `process_output.log` (stdout/stderr del proceso Scrapy).
 - `scrapy.log` (log interno de Scrapy).
+- `datos_limpios/` (una vez ejecutada la limpieza: un CSV por sub-tabla, ver [Módulo de limpieza de datos](#módulo-de-limpieza-de-datos)).
 
 ---
 
@@ -200,6 +220,121 @@ Chequeo de salud del servicio.
 { "status": "ok", "app": "PATO Data Discovery", "version": "3.0.0" }
 ```
 
+### `POST /jobs/{job_id}/clean`
+
+Limpia y clasifica los archivos tabulares (`.xlsx`, `.xls`, `.csv`) descargados por el job en las sub-tablas normalizadas del esquema objetivo (ver [Módulo de limpieza de datos](#módulo-de-limpieza-de-datos)). Genera un CSV por sub-tabla en `downloads/<job_id>/datos_limpios/`.
+
+**Respuesta:**
+
+```json
+{
+  "job_id": "3f2a1c7e-...",
+  "archivos_procesados": ["anex-PMultidimensional-2025.xlsx"],
+  "bloques_detectados": 177,
+  "filas_por_tabla": {
+    "ipm_por_dominio": 46,
+    "privaciones_por_hogar": 660,
+    "proporcion_privaciones": 40,
+    "contribuciones_incidencia": 90,
+    "incidencia_por_sexo_persona": 36,
+    "incidencia_por_sexo_jefe_hogar": 36,
+    "dashboard_02": 0,
+    "contribucion_relativa_privaciones": 0,
+    "poblacion_pobreza_multidimensional": 0,
+    "sin_clasificar": 85
+  },
+  "archivos_salida": {
+    "ipm_por_dominio": "downloads/3f2a1c7e-.../datos_limpios/ipm_por_dominio.csv",
+    "excel": "downloads/3f2a1c7e-.../datos_limpios/datos_limpios.xlsx",
+    "...": "..."
+  }
+}
+```
+
+Además de los CSV, genera un único **Excel consolidado** (`datos_limpios.xlsx`) con una hoja por sub-tabla no vacía (mismos datos que los CSV, encabezados en negrita) para revisión manual rápida.
+
+Errores:
+- `404` si el job no existe.
+- `422` si el job no tiene archivos `.xlsx`/`.xls`/`.csv` para limpiar.
+
+### `GET /jobs/{job_id}/clean/download`
+
+Descarga el Excel consolidado (`datos_limpios.xlsx`, una hoja por sub-tabla) generado por `POST /jobs/{job_id}/clean`. Devuelve `404` si aún no se ha ejecutado la limpieza.
+
+### `GET /jobs/{job_id}/clean/download/{table_name}`
+
+Descarga el CSV de una sub-tabla específica (p. ej. `ipm_por_dominio`, `privaciones_por_hogar`) generada por `POST /jobs/{job_id}/clean`. Los nombres válidos aparecen en `archivos_salida` de esa respuesta. Devuelve `404` si la tabla no existe para ese job (no se generó limpieza, o esa sub-tabla quedó vacía).
+
+También acepta `sin_clasificar`: no es una sub-tabla del esquema, sino un CSV aparte (columnas `title, headers, source_file, source_sheet, row_count`) con los bloques que no calzaron en ninguna sub-tabla, útil para revisión manual.
+
+### `POST /jobs/{job_id}/clean/load`
+
+Carga a PostgreSQL las sub-tablas ya limpiadas de este job, con `UPSERT` idempotente por la clave natural de cada tabla (ver [ddl.sql](app/cleaner/ddl.sql)). Requiere `DATABASE_URL` configurada en `.env`; devuelve `503` si no lo está.
+
+**Respuesta:**
+
+```json
+{
+  "job_id": "3f2a1c7e-...",
+  "reporte": {
+    "ipm_por_dominio": { "insertadas": 46, "rechazadas": 0 },
+    "privaciones_por_hogar": { "insertadas": 660, "rechazadas": 0 }
+  }
+}
+```
+
+---
+
+## Módulo de limpieza de datos
+
+El módulo `app/cleaner/` toma los archivos descargados por un job y los transforma en **sub-tablas normalizadas**, listas para cargar a PostgreSQL y alimentar el servicio de IA Predictiva y el Dashboard Geoespacial del proyecto PATO.
+
+Flujo (orquestado por `clean_job_files` en [clean_job.py](app/cleaner/clean_job.py)):
+
+1. **Extracción** (`block_extractor.py`): recorre cada archivo `.csv`/`.xls`/`.xlsx` del job y detecta bloques de tabla dentro de cada hoja/archivo. Reconoce varios patrones comunes en los anexos del DANE:
+   - **Ancho por año** (`Dominio | Año → 2010 2011 2012...`): una columna por año, despivotado a formato largo.
+   - **Matricial** (`Dimensión | Principales Dominios → Nacional Cabecera Rural...`): una columna por dominio/región/país, despivotado a formato largo.
+   - **Celdas combinadas (merged cells)**: propaga verticalmente el valor de una celda fusionada sobre varias filas de datos (p. ej. una etiqueta 'Sexo' fusionada sobre las filas Hombre/Mujer).
+   - **Columna "huérfana"**: cuando el DANE deja en blanco (sin merge real) la celda de categoría en filas subsiguientes de un mismo grupo (p. ej. 'Nacional' solo en la primera fila de una lista de variables), se propaga hacia abajo con un forward-fill acotado a filas con la misma forma.
+2. **Normalización** (`normalizer.py`): repara encoding, recorta espacios, homogeniza tipos de dato y elimina filas duplicadas/vacías.
+3. **Clasificación y mapeo** (`table_mapper.py`): decide a qué sub-tabla del esquema pertenece cada bloque (según sus columnas y, cuando hace falta desambiguar, el título del bloque), renombra columnas a los nombres destino, castea tipos (`int`/`float`/`boolean`/`text`) y deduplica por la clave natural de cada tabla.
+4. **Exportación** (`exporter.py`): escribe cada sub-tabla como un CSV en `downloads/<job_id>/datos_limpios/`, con metadatos de trazabilidad (`fuente`, `fecha_extraccion`, `fecha_carga`).
+
+Bloques que no calzan con ninguna sub-tabla quedan en `sin_clasificar.csv` (título, encabezados y archivo de origen) para revisión manual.
+
+**Sub-tablas del esquema** (definidas en [schema.py](app/cleaner/schema.py)):
+
+| Tabla | Dashboard | Columnas | Estado |
+|---|---|---|---|
+| `ipm_por_dominio` | 01 | `anio, dominio, ipm` | ✅ Verificado con datos reales del DANE |
+| `privaciones_por_hogar` | 01 | `anio, dominio, variable, ipm` | ✅ Verificado con datos reales del DANE |
+| `proporcion_privaciones` | 01 | `anio, dominio, porcentaje` | ✅ Verificado con datos reales del DANE |
+| `contribuciones_incidencia` | 01 | `anio, dominio, dimension, porcentaje` | ✅ Verificado con datos reales del DANE |
+| `incidencia_por_sexo_persona` | 01 | `anio, dominio, sexo, porcentaje` | ✅ Verificado con datos reales del DANE (requirió soporte de celdas combinadas en `block_extractor.py`) |
+| `incidencia_por_sexo_jefe_hogar` | 01 | `anio, dominio, sexo, porcentaje` | ✅ Verificado con datos reales del DANE |
+| `dashboard_02` | 02 | `anio, region, departamento, personas_hogar, priv_*, ipm, pobre` | ⏳ Pendiente — probablemente requiere una fuente de microdatos por hogar (encuesta/censo) distinta a los anexos agregados que el scraper descarga hoy |
+| `contribucion_relativa_privaciones` | 03 | `anio, privacion, pais, valor_porcentaje` | ⏳ Pendiente — requiere el anexo Latinoamérica del DANE, no probado aún |
+| `poblacion_pobreza_multidimensional` | 03 | `anio, area_geografica, pais, tipo_medida, valor_porcentaje` | ⏳ Pendiente — mismo motivo que la anterior |
+
+**Carga a PostgreSQL** (`db.py`, `loader.py`, `ddl.sql`): cuando `DATABASE_URL` esté configurada en `.env`, `POST /jobs/{job_id}/clean/load` inserta cada sub-tabla con `UPSERT` idempotente (`ON CONFLICT ... DO UPDATE`) sobre su clave natural, por lo que reejecutar la carga no duplica filas. El DDL de referencia está en [ddl.sql](app/cleaner/ddl.sql).
+
+**Uso típico:**
+
+```bash
+# 1. Crea el job de scraping y espera a que termine (status: completado)
+# 2. Limpia y clasifica los archivos descargados
+curl -X POST http://127.0.0.1:8000/jobs/{job_id}/clean
+
+# 3. Descarga el Excel consolidado (todas las sub-tablas en una hoja cada una)
+curl -o datos_limpios.xlsx http://127.0.0.1:8000/jobs/{job_id}/clean/download
+
+# 3b. O descarga solo el CSV de una sub-tabla específica
+curl -o ipm_por_dominio.csv http://127.0.0.1:8000/jobs/{job_id}/clean/download/ipm_por_dominio
+
+# 4. (Opcional, requiere DATABASE_URL en .env) Carga todo a PostgreSQL
+curl -X POST http://127.0.0.1:8000/jobs/{job_id}/clean/load
+```
+
 ---
 
 ## Uso con Postman
@@ -264,6 +399,34 @@ En Postman, dale clic a **Send and Download** (flechita junto al botón "Send") 
 - **Método:** `GET`
 - **URL:** `http://127.0.0.1:8000/health`
 
+### 7. Limpiar y clasificar los datos del job
+
+- **Método:** `POST`
+- **URL:** `http://127.0.0.1:8000/jobs/{{job_id}}/clean`
+
+No requiere body. Devuelve un resumen de archivos procesados, bloques detectados y filas por sub-tabla (`filas_por_tabla`).
+
+### 8. Descargar el Excel consolidado
+
+- **Método:** `GET`
+- **URL:** `http://127.0.0.1:8000/jobs/{{job_id}}/clean/download`
+
+Usa **Send and Download** para guardar `datos_limpios.xlsx` (una hoja por sub-tabla) en disco.
+
+### 8b. Descargar una sub-tabla limpia como CSV
+
+- **Método:** `GET`
+- **URL:** `http://127.0.0.1:8000/jobs/{{job_id}}/clean/download/ipm_por_dominio`
+
+Cambia `ipm_por_dominio` por cualquier nombre de tabla que haya aparecido en `archivos_salida` del paso anterior. Usa **Send and Download** para guardar el CSV en disco.
+
+### 9. Cargar las sub-tablas a PostgreSQL (opcional)
+
+- **Método:** `POST`
+- **URL:** `http://127.0.0.1:8000/jobs/{{job_id}}/clean/load`
+
+Requiere `DATABASE_URL` configurada en `.env` (ver tabla de variables); si no lo está, responde `503`.
+
 
 
 ## Notas y buenas prácticas
@@ -273,3 +436,5 @@ En Postman, dale clic a **Send and Download** (flechita junto al botón "Send") 
 - **Los jobs viven en memoria**: si reinicias el servidor (`python run.py`), se pierde el registro de jobs anteriores (aunque los archivos ya descargados siguen en `downloads/<job_id>/`).
 - **Si un job termina con `archivos_encontrados: []`**, revisa primero `/jobs/{job_id}/log`: la causa más común es que el sitio no usa las palabras del `query` en el texto/URL de sus enlaces de navegación, o que el score mínimo (`MIN_LINK_SCORE` / `MIN_FILE_SCORE`) está muy alto para ese sitio en particular. Puedes ajustar esos valores en el `.env`.
 - **Descargas masivas**: usa `max_pages` con cabeza en sitios grandes — un valor muy alto puede hacer que el job tarde mucho o sature el sitio objetivo (respeta `SCRAPY_DOWNLOAD_DELAY`).
+- **`DATABASE_URL` vacía**: la limpieza (`/clean`) funciona sin PostgreSQL configurado — solo genera los CSV. La carga (`/clean/load`) sí la requiere.
+- **Significado de las columnas del esquema limpio**: `anio` es el año del dato; `dominio` es el ámbito geográfico del dato — para el DANE son exactamente 3 valores (`Nacional`, `Cabecera(s)`, `Centros poblados y rural disperso`), y en las tablas que además desagregan por región (`contribuciones_incidencia`, `incidencia_por_sexo_*`) también puede tomar el nombre de una región (Caribe, Oriental, Central, etc.) o país (en `dashboard_03`); `variable`/`dimension` es qué se está midiendo (Analfabetismo, Rezago escolar, Educación, Salud...); `ipm`/`porcentaje`/`valor_porcentaje` es el valor del indicador en puntos porcentuales.

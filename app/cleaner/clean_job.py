@@ -1,3 +1,4 @@
+from datetime import datetime, timezone
 from pathlib import Path
 
 from app.cleaner.block_extractor import (
@@ -5,14 +6,14 @@ from app.cleaner.block_extractor import (
     extract_blocks_from_csv,
     extract_blocks_from_workbook,
 )
-from app.cleaner.exporter import export_to_workbook
+from app.cleaner.exporter import export_tables
 from app.cleaner.normalizer import normalize_blocks
-from app.cleaner.sheet_classifier import classify_blocks
+from app.cleaner.table_mapper import map_blocks
 
 
 SUPPORTED_EXTENSIONS = {".xlsx", ".xls", ".csv"}
 
-OUTPUT_FILENAME = "datos_limpios.xlsx"
+OUTPUT_DIR_NAME = "datos_limpios"
 
 
 def _extract_blocks_from_file(path: Path) -> list[DataBlock]:
@@ -36,9 +37,10 @@ def _extract_blocks_from_file(path: Path) -> list[DataBlock]:
 def clean_job_files(job_dir: Path) -> dict:
     """
     Recorre los archivos descargados de un job, extrae las tablas
-    que contienen, las normaliza y las exporta al formato estándar
-    (mismo layout de 'Formato de Datos.xlsx') en
-    <job_dir>/datos_limpios.xlsx.
+    que contienen, las normaliza, las clasifica en las sub-tablas
+    del esquema objetivo (ver Contexto_Limpieza_Datos_Scraper.md) y
+    las exporta como CSV listos para cargar a PostgreSQL en
+    <job_dir>/datos_limpios/<tabla>.csv.
     """
 
     if not job_dir.exists():
@@ -68,21 +70,23 @@ def clean_job_files(job_dir: Path) -> dict:
 
     normalized_blocks = normalize_blocks(all_blocks)
 
-    grouped_blocks = classify_blocks(normalized_blocks)
+    mapped_tables = map_blocks(normalized_blocks)
 
-    output_path = job_dir / OUTPUT_FILENAME
+    output_dir = job_dir / OUTPUT_DIR_NAME
 
-    export_to_workbook(
-        grouped_blocks,
-        str(output_path),
+    written_files = export_tables(
+        mapped_tables,
+        output_dir=output_dir,
+        fuente="DANE",
+        fecha_extraccion=datetime.now(timezone.utc).isoformat(),
     )
 
     return {
         "archivos_procesados": processed_files,
         "bloques_detectados": len(normalized_blocks),
-        "bloques_por_hoja": {
-            sheet_name: len(blocks)
-            for sheet_name, blocks in grouped_blocks.items()
+        "filas_por_tabla": {
+            table_name: len(rows)
+            for table_name, rows in mapped_tables.items()
         },
-        "archivo_salida": output_path.name,
+        "archivos_salida": written_files,
     }

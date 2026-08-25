@@ -109,6 +109,12 @@ APP_NAME = get_string(
     "PATO Data Discovery",
 )
 
+
+DATABASE_URL = get_string(
+    "DATABASE_URL",
+    "",
+)
+
 APP_VERSION = get_string(
     "APP_VERSION",
     "3.0.0",
