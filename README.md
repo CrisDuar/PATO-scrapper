@@ -397,6 +397,19 @@ curl -X POST http://127.0.0.1:8000/jobs/{job_id}/clean/load
 curl http://127.0.0.1:8000/jobs/{job_id}/clean/load/log
 ```
 
+> **Body:** ninguno de estos 5 endpoints recibe body en la petición — toda la información que necesitan (`job_id`, y para `clean/download/{table_name}` también `table_name`) va en la URL. Enviar un `Content-Type: application/json` con un body no tiene efecto; se ignora.
+>
+> Esto los distingue de `POST /jobs` (creación de job), que sí requiere un body JSON:
+>
+> ```json
+> {
+>   "urls": ["www.dane.gov.co"],
+>   "query": ["IPM"],
+>   "max_depth": 6,
+>   "max_pages": 300
+> }
+> ```
+
 ---
 
 ## Pruebas
