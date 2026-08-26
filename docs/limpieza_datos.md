@@ -202,35 +202,3 @@ revierte todo el job (no quedan cargas parciales). Cada fila se resuelve así:
    `(geographic_area_id, indicator_id, period, breakdown_type, breakdown_value)` — volver a
    cargar el mismo job no duplica filas, las actualiza.
 
-## Por qué se normaliza así: el problema de fondo
-
-Todas estas reglas resuelven el mismo problema: los archivos del DANE están diseñados para
-**lectura humana en Excel**, no para consumo por máquina. Usan fusión de celdas para "no
-repetirse", ponen contexto (año, dominio) en el título en vez de en una columna, y mezclan
-formato ancho y largo según lo que se vea mejor impreso. Ninguna de esas convenciones es estable
-entre archivos ni entre años.
-
-La normalización existe para que dos maneras distintas de expresar el mismo dato — `"Año "` vs
-`"Año"`, una tabla ancha vs una larga, "Sexo Persona" vs una columna sin nombre — terminen en la
-**misma representación canónica** antes de compararse o cargarse. Sin esto, cada archivo nuevo
-del DANE rompería el mapeo a sub-tablas o, peor, generaría filas silenciosamente duplicadas con
-claves ligeramente distintas.
-
-La deduplicación por clave natural y el `UPSERT` en PostgreSQL persiguen la misma idea desde el
-otro extremo: permiten volver a correr `clean` y `load` sobre el mismo job (o sobre jobs que se
-solapan en período/dominio) sin que la base de datos acumule filas repetidas ni datos
-inconsistentes.
-
-## Límites actuales
-
-- **6 / 9 tablas** sin mapeo a PostgreSQL — siguen disponibles solo como CSV/Excel hasta que se
-  defina su `indicator.code`.
-- **`sin_clasificar`** — un bloque que no calza con ninguna `TableSpec` no se pierde, pero
-  tampoco se carga: requiere revisión manual del CSV de salida.
-- **Heurísticas del DANE** — reglas como `_fix_blank_characteristic_header` o el forward-fill de
-  columna huérfana están ajustadas a patrones observados en archivos concretos del DANE; un
-  formato nuevo puede necesitar una regla nueva.
-
----
-
-*Basado en el código de `app/cleaner/` en la rama `data-cleaner`.*
