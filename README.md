@@ -23,6 +23,7 @@ Además, incluye un **módulo de limpieza de datos** que toma los archivos tabul
 - [Estructura del proyecto](#estructura-del-proyecto)
 - [Endpoints de la API](#endpoints-de-la-api)
 - [Módulo de limpieza de datos](#módulo-de-limpieza-de-datos)
+- [Pruebas](#pruebas)
 - [Uso con Postman](#uso-con-postman)
 - [Notas y buenas prácticas](#notas-y-buenas-prácticas)
 
@@ -75,7 +76,7 @@ Todas las variables son opcionales; si no existen, se usan los valores por defec
 | `DOWNLOADS_DIR` | `downloads` | Carpeta donde se guardan los archivos descargados |
 | `FILE_EXTENSIONS` | `.pdf,.xlsx,.xls,.csv,.zip,.rar,.7z,.json,.xml,.txt,.doc,.docx` | Extensiones consideradas "archivo descargable" |
 | `DISCOVERY_KEYWORDS` | `datos,estadisticas,indicadores,...` | Palabras que suman puntos a páginas/enlaces de portales estadísticos |
-| `DATABASE_URL` | *(vacío)* | Cadena de conexión a PostgreSQL (`postgresql://usuario:password@host:puerto/bd`). Solo requerida para `POST /jobs/{job_id}/clean/load`. |
+| `DATABASE_URL` | *(vacío)* | Cadena de conexión a PostgreSQL (`postgresql://usuario:password@host:puerto/bd`). Solo requerida para `POST /jobs/{job_id}/clean/load`. Si el usuario/contraseña tienen caracteres especiales (`@`, `:`, etc.), deben ir con percent-encoding (p. ej. `n0mep%40gan%3Av`). |
 
 Ejemplo de `.env`:
 
@@ -121,13 +122,17 @@ app/
     ├── schema.py                 # Definición declarativa de las sub-tablas del esquema objetivo
     ├── table_mapper.py           # Clasifica bloques en sub-tablas y mapea sus columnas
     ├── exporter.py                # Exporta cada sub-tabla como CSV y a un Excel consolidado
-    ├── db.py                     # Conexión a PostgreSQL y UPSERT idempotente
-    ├── loader.py                 # Carga los CSV de un job a PostgreSQL
-    ├── ddl.sql                   # DDL de referencia para las tablas en PostgreSQL
+    ├── db.py                     # Conexión a PostgreSQL, transacciones y UPSERT idempotente
+    ├── loader.py                 # Carga los CSV de un job a PostgreSQL y registra el resultado
+    ├── star_schema_mapper.py     # Traduce sub-tablas planas al esquema estrella real (geographic_area/indicator/ipm_statistic)
+    ├── ddl.sql                   # DDL de referencia (histórico; el esquema real en BD es geographic_area/indicator/ipm_statistic, ver más abajo)
     └── text_utils.py             # Utilidades de texto compartidas
 run.py                            # Punto de entrada (uvicorn)
 Formato de Datos.xlsx             # Plantilla/layout de referencia para el esquema de salida
 downloads/                        # Carpeta de salida (un subdirectorio por job_id)
+tests/
+├── conftest.py                   # Fixture requires_db: salta tests si no hay conexión a PostgreSQL
+└── test_loader.py                # Pruebas de carga e integración contra la base de datos real
 ```
 
 Cada job crea una carpeta `downloads/<job_id>/` con:
@@ -135,6 +140,7 @@ Cada job crea una carpeta `downloads/<job_id>/` con:
 - `process_output.log` (stdout/stderr del proceso Scrapy).
 - `scrapy.log` (log interno de Scrapy).
 - `datos_limpios/` (una vez ejecutada la limpieza: un CSV por sub-tabla, ver [Módulo de limpieza de datos](#módulo-de-limpieza-de-datos)).
+  - `carga_log.json` (una vez ejecutada `POST /jobs/{job_id}/clean/load`: historial de cada intento de carga a PostgreSQL, ver [Endpoints de la API](#endpoints-de-la-api)).
 
 ---
 
@@ -269,7 +275,7 @@ También acepta `sin_clasificar`: no es una sub-tabla del esquema, sino un CSV a
 
 ### `POST /jobs/{job_id}/clean/load`
 
-Carga a PostgreSQL las sub-tablas ya limpiadas de este job, con `UPSERT` idempotente por la clave natural de cada tabla (ver [ddl.sql](app/cleaner/ddl.sql)). Requiere `DATABASE_URL` configurada en `.env`; devuelve `503` si no lo está.
+Carga a PostgreSQL las sub-tablas ya limpiadas de este job que tienen mapeo acordado al esquema estrella real (`ipm_por_dominio`, `proporcion_privaciones`, `privaciones_por_hogar` — ver [Carga a PostgreSQL](#carga-a-postgresql)), con `UPSERT` idempotente. Toda la carga del job corre en **una sola transacción**: si alguna tabla falla, se revierte el job completo (no quedan filas parciales). Requiere `DATABASE_URL` configurada en `.env`; devuelve `503` si no lo está. El resultado queda registrado en `downloads/<job_id>/datos_limpios/carga_log.json`.
 
 **Respuesta:**
 
@@ -278,9 +284,36 @@ Carga a PostgreSQL las sub-tablas ya limpiadas de este job, con `UPSERT` idempot
   "job_id": "3f2a1c7e-...",
   "reporte": {
     "ipm_por_dominio": { "insertadas": 46, "rechazadas": 0 },
-    "privaciones_por_hogar": { "insertadas": 660, "rechazadas": 0 }
+    "privaciones_por_hogar": { "insertadas": 660, "rechazadas": 0 },
+    "proporcion_privaciones": { "insertadas": 40, "rechazadas": 0 },
+    "contribuciones_incidencia": {
+      "insertadas": 0, "rechazadas": 0, "omitidas": 90,
+      "motivo": "Sin mapeo acordado al esquema de PostgreSQL; disponible solo en el CSV/Excel exportado."
+    },
+    "...": "..."
   }
 }
+```
+
+Si una tabla falla (p. ej. error de conexión o de datos), su entrada trae `"error": "..."` y `rechazadas` igual al total de filas de esa tabla; como la carga es transaccional, ninguna otra tabla del mismo job queda insertada tampoco.
+
+### `GET /jobs/{job_id}/clean/load/log`
+
+Devuelve el historial completo de cargas a PostgreSQL de este job (`carga_log.json`): uno o más intentos, cada uno con fecha, totales insertados/rechazados, si fue exitoso, y el detalle por tabla. Devuelve `404` si el job aún no tiene ninguna carga registrada.
+
+**Respuesta:**
+
+```json
+[
+  {
+    "job_id": "3f2a1c7e-...",
+    "fecha_carga": "2026-08-26T00:09:03.397696+00:00",
+    "total_insertadas": 525,
+    "total_rechazadas": 0,
+    "exito": true,
+    "detalle": { "...": "..." }
+  }
+]
 ```
 
 ---
@@ -316,7 +349,33 @@ Bloques que no calzan con ninguna sub-tabla quedan en `sin_clasificar.csv` (tít
 | `contribucion_relativa_privaciones` | 03 | `anio, privacion, pais, valor_porcentaje` | ⏳ Esquema listo — requiere el anexo Latinoamérica del DANE, aún no encontrado por el scraper |
 | `poblacion_pobreza_multidimensional` | 03 | `anio, area_geografica, pais, tipo_medida, valor_porcentaje` | ⏳ Esquema listo — mismo motivo que la anterior |
 
-**Carga a PostgreSQL** (`db.py`, `loader.py`, `ddl.sql`): cuando `DATABASE_URL` esté configurada en `.env`, `POST /jobs/{job_id}/clean/load` inserta cada sub-tabla con `UPSERT` idempotente (`ON CONFLICT ... DO UPDATE`) sobre su clave natural, por lo que reejecutar la carga no duplica filas. El DDL de referencia está en [ddl.sql](app/cleaner/ddl.sql).
+### Carga a PostgreSQL
+
+La base de datos compartida del proyecto (`clean_data_db`) usa un **esquema estrella** ya provisionado por el equipo, distinto de las 9 sub-tablas planas de arriba:
+
+| Tabla | Descripción |
+|---|---|
+| `geographic_area` | Catálogo de áreas geográficas (`id`, `parent_id`, `level`, `name`, `country_iso_code`, `official_code`). Sin `UNIQUE` de negocio — la deduplicación por `(name, level)` la hace la aplicación. |
+| `indicator` | Catálogo de indicadores (`id`, `code` único, `name`, `category`). |
+| `ipm_statistic` | Tabla de hechos (`geographic_area_id`, `indicator_id`, `period`, `breakdown_type`, `breakdown_value`, `value`, `source`, `extracted_at`, `loaded_at`), con `UNIQUE(geographic_area_id, indicator_id, period, breakdown_type, breakdown_value)` como clave natural real. |
+
+De las 9 sub-tablas planas, solo **3 tienen convención de `indicator.code` acordada** (fijada por las vistas SQL ya existentes en la base — `vw_ipm_by_domain`, `vw_average_deprivations`, `vw_deprivations_by_variable`) y por eso son las únicas que `POST /jobs/{job_id}/clean/load` carga a `ipm_statistic`:
+
+| Sub-tabla plana | `indicator.code` | `indicator.category` | `breakdown_type` |
+|---|---|---|---|
+| `ipm_por_dominio` | `MPI` (fijo) | `mpi` | `none` |
+| `proporcion_privaciones` | `INTENSITY_A` (fijo) | `intensity` | `none` |
+| `privaciones_por_hogar` | uno por `variable` (slug en mayúsculas, truncado a 50 caracteres) | `privation_variable` | `none` |
+
+El mapeo lo hace `app/cleaner/star_schema_mapper.py`; `app/cleaner/loader.py` resuelve/crea las filas de `geographic_area` e `indicator` que falten y hace `UPSERT` idempotente (`ON CONFLICT ... DO UPDATE`) sobre la clave natural real de `ipm_statistic`, por lo que reejecutar la carga no duplica filas ni indicadores.
+
+Las otras 6 sub-tablas (`contribuciones_incidencia`, `incidencia_por_sexo_persona`, `incidencia_por_sexo_jefe_hogar`, `dashboard_02`, `contribucion_relativa_privaciones`, `poblacion_pobreza_multidimensional`) **no se cargan a PostgreSQL todavía** — el reporte las marca como `omitidas` con el motivo — porque no tienen convención de `indicator.code`/`breakdown_type` acordada con el equipo (en particular `dashboard_02`, que trae microdatos de hogar con 15 privaciones booleanas por fila y no encaja directamente en el modelo `indicator + value` de una métrica por fila). Siguen disponibles como CSV/Excel para descarga manual.
+
+**Transacciones y manejo de errores**: toda la carga de un job corre dentro de una única transacción (`app/cleaner/db.py::transaction`) — si cualquier tabla falla (error de datos o de conexión), se revierte el job completo, evitando estados parciales en la base compartida. Los errores de PostgreSQL (`psycopg2.Error`) se capturan y se reportan por tabla sin tumbar el proceso.
+
+**Registro del resultado**: cada ejecución de `POST /jobs/{job_id}/clean/load` agrega una entrada a `downloads/<job_id>/datos_limpios/carga_log.json` (fecha, totales insertados/rechazados, éxito, detalle por tabla), acumulando el historial de todos los intentos de carga de ese job. Se consulta con `GET /jobs/{job_id}/clean/load/log`.
+
+El DDL histórico de las 9 tablas planas (no usado por la carga real, que apunta al esquema estrella) está en [ddl.sql](app/cleaner/ddl.sql), como referencia de los tipos de dato de cada columna.
 
 **Uso típico:**
 
@@ -331,9 +390,25 @@ curl -o datos_limpios.xlsx http://127.0.0.1:8000/jobs/{job_id}/clean/download
 # 3b. O descarga solo el CSV de una sub-tabla específica
 curl -o ipm_por_dominio.csv http://127.0.0.1:8000/jobs/{job_id}/clean/download/ipm_por_dominio
 
-# 4. (Opcional, requiere DATABASE_URL en .env) Carga todo a PostgreSQL
+# 4. (Opcional, requiere DATABASE_URL en .env) Carga las 3 sub-tablas soportadas a PostgreSQL
 curl -X POST http://127.0.0.1:8000/jobs/{job_id}/clean/load
+
+# 5. Revisa el historial de cargas de este job
+curl http://127.0.0.1:8000/jobs/{job_id}/clean/load/log
 ```
+
+---
+
+## Pruebas
+
+Las pruebas de carga e integración (`tests/test_loader.py`) corren contra la base de datos real definida en `DATABASE_URL` (no hay mocks): validan inserción, idempotencia del `UPSERT`, actualización de valores, rechazo de filas inválidas, el rollback transaccional ante un error a mitad de carga, y el registro en `carga_log.json`. Se saltan automáticamente si `DATABASE_URL` no está configurada o la base no es accesible (`tests/conftest.py::requires_db`).
+
+```bash
+pip install -r requirements.txt   # incluye pytest
+python -m pytest tests/ -v
+```
+
+Cada test aísla sus datos con un nombre de área geográfica único (UUID) para no chocar entre corridas ni con datos reales — el usuario de servicio (`scraper_service`) solo tiene permisos `INSERT`/`SELECT`/`UPDATE` en la base compartida (sin `DELETE`, por diseño), así que las filas de prueba no se limpian al terminar, pero quedan marcadas con `geographic_area.name` empezando en `__test__`.
 
 ---
 
@@ -425,7 +500,14 @@ Cambia `ipm_por_dominio` por cualquier nombre de tabla que haya aparecido en `ar
 - **Método:** `POST`
 - **URL:** `http://127.0.0.1:8000/jobs/{{job_id}}/clean/load`
 
-Requiere `DATABASE_URL` configurada en `.env` (ver tabla de variables); si no lo está, responde `503`.
+Requiere `DATABASE_URL` configurada en `.env` (ver tabla de variables); si no lo está, responde `503`. Solo carga `ipm_por_dominio`, `proporcion_privaciones` y `privaciones_por_hogar` (ver [Carga a PostgreSQL](#carga-a-postgresql)); el resto aparece como `omitidas` en el reporte.
+
+### 10. Ver el historial de cargas a PostgreSQL
+
+- **Método:** `GET`
+- **URL:** `http://127.0.0.1:8000/jobs/{{job_id}}/clean/load/log`
+
+Devuelve todos los intentos de carga de este job (éxito/error, totales, detalle por tabla). Responde `404` si aún no se ha ejecutado ninguna carga.
 
 
 
@@ -437,4 +519,6 @@ Requiere `DATABASE_URL` configurada en `.env` (ver tabla de variables); si no lo
 - **Si un job termina con `archivos_encontrados: []`**, revisa primero `/jobs/{job_id}/log`: la causa más común es que el sitio no usa las palabras del `query` en el texto/URL de sus enlaces de navegación, o que el score mínimo (`MIN_LINK_SCORE` / `MIN_FILE_SCORE`) está muy alto para ese sitio en particular. Puedes ajustar esos valores en el `.env`.
 - **Descargas masivas**: usa `max_pages` con cabeza en sitios grandes — un valor muy alto puede hacer que el job tarde mucho o sature el sitio objetivo (respeta `SCRAPY_DOWNLOAD_DELAY`).
 - **`DATABASE_URL` vacía**: la limpieza (`/clean`) funciona sin PostgreSQL configurado — solo genera los CSV. La carga (`/clean/load`) sí la requiere.
+- **La carga a PostgreSQL es transaccional por job**: si una sub-tabla falla al cargar, se revierte todo el job (ninguna fila queda insertada a medias). Revisa `carga_log.json` (o `GET /jobs/{job_id}/clean/load/log`) para ver el detalle del error.
+- **Solo 3 de las 9 sub-tablas se cargan a PostgreSQL hoy** (`ipm_por_dominio`, `proporcion_privaciones`, `privaciones_por_hogar`), porque son las únicas con convención de `indicator.code` acordada con el equipo. El resto sigue disponible en CSV/Excel.
 - **Significado de las columnas del esquema limpio**: `anio` es el año del dato; `dominio` es el ámbito geográfico del dato — para el DANE son exactamente 3 valores (`Nacional`, `Cabecera(s)`, `Centros poblados y rural disperso`), y en las tablas que además desagregan por región (`contribuciones_incidencia`, `incidencia_por_sexo_*`) también puede tomar el nombre de una región (Caribe, Oriental, Central, etc.) o país (en `dashboard_03`); `variable`/`dimension` es qué se está midiendo (Analfabetismo, Rezago escolar, Educación, Salud...); `ipm`/`porcentaje`/`valor_porcentaje` es el valor del indicador en puntos porcentuales.

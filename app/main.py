@@ -1,3 +1,4 @@
+import json
 import os
 import sys
 import time
@@ -656,7 +657,7 @@ def load_clean_job(
         )
 
     try:
-        report = load_tables_from_dir(clean_dir)
+        report = load_tables_from_dir(clean_dir, job_id=job_id)
 
     except RuntimeError as exc:
 
@@ -669,6 +670,36 @@ def load_clean_job(
         "job_id": job_id,
         "reporte": report,
     }
+
+
+@app.get("/jobs/{job_id}/clean/load/log")
+def get_load_log(
+    job_id: str,
+):
+    """
+    Devuelve el historial de cargas a PostgreSQL de este job
+    (uno o más intentos), registrado por POST /jobs/{job_id}/clean/load
+    en datos_limpios/carga_log.json.
+    """
+
+    log_path = (
+        DOWNLOADS_DIR
+        / job_id
+        / "datos_limpios"
+        / "carga_log.json"
+    )
+
+    if not log_path.exists():
+
+        raise HTTPException(
+            status_code=404,
+            detail=(
+                "Aún no se ha registrado ninguna carga para este job. "
+                f"Ejecuta primero POST /jobs/{job_id}/clean/load."
+            ),
+        )
+
+    return json.loads(log_path.read_text(encoding="utf-8"))
 
 
 @app.get("/jobs/{job_id}/clean/download")
