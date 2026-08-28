@@ -38,6 +38,13 @@ from app.config import (
 from app.cleaner.clean_job import clean_job_files
 from app.cleaner.loader import load_tables_from_dir
 
+from app.cepal_client import (
+    buscar_indicadores,
+    descargar_datos_indicador,
+    transformar_a_formato_estandar,
+    CepalApiError,
+)
+
 
 
 
@@ -47,6 +54,9 @@ SPIDER_FILE = (
     / "scraper"
     / "ipm_spider.py"
 )
+
+CEPAL_EXPORTS_DIR = DOWNLOADS_DIR / "cepal_exports"
+CEPAL_EXPORTS_DIR.mkdir(parents=True, exist_ok=True)
 
 
 
@@ -766,6 +776,136 @@ def download_clean_table(
     return FileResponse(
         str(output_path),
         filename=output_path.name,
+    )
+
+
+class CepalExportRequest(BaseModel):
+
+    indicator_id: int = Field(
+        ...,
+        description=(
+            "ID numérico del indicador en CEPALSTAT "
+            "(usa GET /cepal/buscar-indicador para encontrarlo)."
+        ),
+    )
+
+    lang: str = Field(
+        "es",
+        description="Idioma de los datos: 'es' o 'en'.",
+    )
+
+    fuente: str = Field(
+        "CEPALSTAT",
+        description="Texto a usar en la columna 'fuente' del CSV resultante.",
+    )
+
+
+@app.get("/cepal/buscar-indicador")
+def cepal_buscar_indicador(
+    nombre: str,
+    lang: str = "es",
+):
+    """
+    Busca en el árbol temático de CEPALSTAT los indicadores cuyo nombre
+    contiene `nombre`, para encontrar el indicator_id que necesitas
+    para POST /cepal/export.
+    """
+
+    try:
+        resultados = buscar_indicadores(nombre, lang=lang)
+
+    except CepalApiError as exc:
+
+        raise HTTPException(
+            status_code=502,
+            detail=str(exc),
+        )
+
+    except Exception as exc:
+
+        raise HTTPException(
+            status_code=502,
+            detail=f"Error consultando CEPALSTAT: {exc}",
+        )
+
+    if not resultados:
+
+        raise HTTPException(
+            status_code=404,
+            detail=f"No se encontraron indicadores que contengan '{nombre}'.",
+        )
+
+    return {
+        "query": nombre,
+        "resultados": resultados,
+    }
+
+
+@app.post("/cepal/export")
+def cepal_export(
+    req: CepalExportRequest,
+):
+    """
+    Descarga los datos de un indicador de CEPALSTAT y los guarda como CSV
+    en el formato: anio,dominio,ipm,fuente,fecha_extraccion,fecha_carga
+    """
+
+    try:
+        df_crudo = descargar_datos_indicador(
+            req.indicator_id,
+            lang=req.lang,
+        )
+
+        df_csv = transformar_a_formato_estandar(
+            df_crudo,
+            fuente=req.fuente,
+        )
+
+    except CepalApiError as exc:
+
+        raise HTTPException(
+            status_code=502,
+            detail=str(exc),
+        )
+
+    export_id = str(uuid.uuid4())
+
+    filename = f"cepal_indicador_{req.indicator_id}_{export_id}.csv"
+
+    filepath = CEPAL_EXPORTS_DIR / filename
+
+    df_csv.to_csv(filepath, index=False, encoding="utf-8")
+
+    return {
+        "export_id": export_id,
+        "filename": filename,
+        "filas": len(df_csv),
+        "columnas": list(df_csv.columns),
+        "muestra": df_csv.head(5).to_dict(orient="records"),
+    }
+
+
+@app.get("/cepal/export/{filename}/download")
+def cepal_export_download(
+    filename: str,
+):
+
+    filepath = (CEPAL_EXPORTS_DIR / filename).resolve()
+
+    if (
+        CEPAL_EXPORTS_DIR.resolve() not in filepath.parents
+        or not filepath.exists()
+    ):
+
+        raise HTTPException(
+            status_code=404,
+            detail="Archivo no encontrado.",
+        )
+
+    return FileResponse(
+        str(filepath),
+        filename=filename,
+        media_type="text/csv",
     )
 
 
