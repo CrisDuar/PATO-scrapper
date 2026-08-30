@@ -22,11 +22,20 @@ logger = logging.getLogger("cleaner.loader")
 
 LOG_FILE_NAME = "carga_log.json"
 
-# Solo estas 3 sub-tablas tienen una convención de indicator.code
+# Solo estas sub-tablas tienen una convención de indicator.code
 # acordada con el equipo (ver vw_ipm_by_domain, vw_average_deprivations,
-# vw_deprivations_by_variable). El resto se sigue exportando a CSV/Excel
-# pero no se carga a PostgreSQL hasta que se defina su mapeo.
-LOADABLE_TABLES = ("ipm_por_dominio", "proporcion_privaciones", "privaciones_por_hogar")
+# vw_deprivations_by_variable, vw_incidence_by_dimension,
+# vw_incidence_by_household_head_sex, vw_incidence_by_person_sex). El
+# resto se sigue exportando a CSV/Excel pero no se carga a PostgreSQL
+# hasta que se defina su mapeo.
+LOADABLE_TABLES = (
+    "ipm_por_dominio",
+    "proporcion_privaciones",
+    "privaciones_por_hogar",
+    "contribuciones_incidencia",
+    "incidencia_por_sexo_jefe_hogar",
+    "incidencia_por_sexo_persona",
+)
 
 
 def _coerce_csv_value(value: str, column: ColumnSpec):
@@ -224,6 +233,8 @@ def _load_table(cursor, table_name: str, rows: list[dict]) -> dict:
                 "indicator_id": indicator_id,
                 "period": statistic["period"],
                 "value": statistic["value"],
+                "breakdown_type": statistic["breakdown_type"],
+                "breakdown_value": statistic["breakdown_value"],
                 "source": statistic["source"],
                 "extracted_at": statistic["extracted_at"],
             }

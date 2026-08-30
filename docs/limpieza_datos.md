@@ -16,7 +16,7 @@ sobre cada archivo descargado del job:
 
 El resultado son 9 sub-tablas planas (una por tipo de indicador del IPM) más un cajón
 `sin_clasificar` para lo que no se pudo mapear, exportadas como CSV individuales y como un único
-`datos_limpios.xlsx`. De esas 9, solo 3 tienen un mapeo acordado hacia el esquema estrella de
+`datos_limpios.xlsx`. De esas 9, 6 tienen un mapeo acordado hacia el esquema estrella de
 PostgreSQL; el resto queda disponible solo como archivo.
 
 ## 1. Extracción de bloques
@@ -169,27 +169,43 @@ alguien los revise a mano.
 
 ## 5. Carga a PostgreSQL
 
-De las 9 sub-tablas, solo 3 tienen un mapeo acordado hacia el esquema estrella real de la base de
-datos (`geographic_area` / `indicator` / `ipm_statistic`):
+De las 9 sub-tablas, 6 tienen un mapeo acordado hacia el esquema estrella real de la base de
+datos (`geographic_area` / `indicator` / `ipm_statistic`), definido en `star_schema_mapper.py`:
 
-| Sub-tabla | indicator.code | Vista de referencia |
-|---|---|---|
-| `ipm_por_dominio` | `MPI` | `vw_ipm_by_domain` |
-| `proporcion_privaciones` | `INTENSITY_A` | `vw_average_deprivations` |
-| `privaciones_por_hogar` | un código por variable (ver abajo) | `vw_deprivations_by_variable` |
+| Sub-tabla | indicator.code | breakdown_type | Vista de referencia |
+|---|---|---|---|
+| `ipm_por_dominio` | `MPI` | `none` | `vw_ipm_by_domain` |
+| `proporcion_privaciones` | `INTENSITY_A` | `none` | `vw_average_deprivations` |
+| `privaciones_por_hogar` | un código por variable (ver abajo) | `none` | `vw_deprivations_by_variable` |
+| `contribuciones_incidencia` | un código por dimensión (ver abajo) | `none` | `vw_dimension_contribution` |
+| `incidencia_por_sexo_jefe_hogar` | `MPI` | `household_head_sex` | `vw_incidence_by_household_head_sex` |
+| `incidencia_por_sexo_persona` | `MPI` | `person_sex` | `vw_incidence_by_person_sex` |
 
-Las 6 sub-tablas restantes se siguen exportando a CSV/Excel, pero se omiten de la carga a
-PostgreSQL hasta que el equipo acuerde su convención de `indicator.code`.
+Las 3 sub-tablas restantes (`dashboard_02`, `contribucion_relativa_privaciones`,
+`poblacion_pobreza_multidimensional`) se siguen exportando a CSV/Excel, pero se omiten de la
+carga a PostgreSQL hasta que el equipo acuerde su convención de `indicator.code`.
 
-### Slug de indicador (para privaciones_por_hogar)
+### Slug de indicador (para privaciones_por_hogar y contribuciones_incidencia)
 
-Como `privaciones_por_hogar` no tiene un indicador fijo (cada variable de privación es su propio
-indicador), `_slug_indicator_code()` genera el código a partir del nombre de la variable:
-mayúsculas, sin tildes, símbolos reemplazados por guion bajo, truncado a 50 caracteres (límite de
-`varchar(50)` en la columna). Es determinístico — el mismo texto de entrada siempre produce el
-mismo código — para que el `UPSERT` sea idempotente.
+Como `privaciones_por_hogar` y `contribuciones_incidencia` no tienen un indicador fijo (cada
+variable de privación, o cada dimensión, es su propio indicador), `_slug_indicator_code()` genera
+el código a partir del nombre de la variable/dimensión: mayúsculas, sin tildes, símbolos
+reemplazados por guion bajo, truncado a 50 caracteres (límite de `varchar(50)` en la columna). Es
+determinístico — el mismo texto de entrada siempre produce el mismo código — para que el
+`UPSERT` sea idempotente. `indicator.category` queda como `privation_variable` o `dimension`
+respectivamente, según `StarMapping.indicator_category_from_column`.
 
 **Variable:** `Privación por Analfabetismo` → **indicator.code:** `PRIVACION_POR_ANALFABETISMO`
+
+**Dimensión:** `Condiciones Educativas` → **indicator.code:** `CONDICIONES_EDUCATIVAS`
+
+### Breakdown (desagregación por sexo)
+
+`incidencia_por_sexo_jefe_hogar` e `incidencia_por_sexo_persona` comparten el mismo
+`indicator.code` (`MPI`) que `ipm_por_dominio`, pero se distinguen por `breakdown_type`
+(`household_head_sex` / `person_sex`) y `breakdown_value` (el valor de la columna `sexo` del
+bloque de origen, p. ej. `Hombre`/`Mujer`). Sin esto, sus filas chocarían con las de
+`ipm_por_dominio` en la clave única de `ipm_statistic`.
 
 ### Upsert idempotente
 

@@ -50,7 +50,12 @@ IPM_POR_DOMINIO = TableSpec(
     ),
     natural_key=("anio", "dominio"),
     required_header_keys=("anio", "dominio", "ipm"),
-    header_key_aliases={"valor": "ipm"},
+    header_key_aliases={
+        "ano": "anio",
+        "valor": "ipm",
+        "principales_dominios": "dominio",
+        "regiones": "dominio",
+    },
 )
 
 PRIVACIONES_POR_HOGAR = TableSpec(
@@ -64,7 +69,7 @@ PRIVACIONES_POR_HOGAR = TableSpec(
     ),
     natural_key=("anio", "dominio", "variable"),
     required_header_keys=("anio", "dominio", "variable", "ipm"),
-    header_key_aliases={"valor": "ipm", "indicador": "variable"},
+    header_key_aliases={"ano": "anio", "valor": "ipm", "indicador": "variable"},
 )
 
 PROPORCION_PRIVACIONES = TableSpec(
@@ -77,7 +82,12 @@ PROPORCION_PRIVACIONES = TableSpec(
     ),
     natural_key=("anio", "dominio"),
     required_header_keys=("anio", "dominio", "porcentaje"),
-    header_key_aliases={"valor": "porcentaje"},
+    header_key_aliases={
+        "ano": "anio",
+        "valor": "porcentaje",
+        "principales_dominios": "dominio",
+        "regiones": "dominio",
+    },
 )
 
 CONTRIBUCIONES_INCIDENCIA = TableSpec(
@@ -92,6 +102,7 @@ CONTRIBUCIONES_INCIDENCIA = TableSpec(
     natural_key=("anio", "dominio", "dimension"),
     required_header_keys=("dominio", "dimension", "porcentaje"),
     header_key_aliases={
+        "ano": "anio",
         "valor": "porcentaje",
         "principales_dominios": "dominio",
         "regiones": "dominio",
@@ -110,6 +121,7 @@ INCIDENCIA_POR_SEXO_PERSONA = TableSpec(
     natural_key=("anio", "dominio", "sexo"),
     required_header_keys=("dominio", "sexo_persona", "porcentaje"),
     header_key_aliases={
+        "ano": "anio",
         "sexo_persona": "sexo",
         "valor": "porcentaje",
         "principales_dominios": "dominio",
@@ -129,6 +141,7 @@ INCIDENCIA_POR_SEXO_JEFE_HOGAR = TableSpec(
     natural_key=("anio", "dominio", "sexo"),
     required_header_keys=("dominio", "sexo_jefe_hogar", "porcentaje"),
     header_key_aliases={
+        "ano": "anio",
         "sexo_jefe_hogar": "sexo",
         "valor": "porcentaje",
         "principales_dominios": "dominio",

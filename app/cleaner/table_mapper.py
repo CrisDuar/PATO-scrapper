@@ -90,6 +90,30 @@ def _title_matches(spec_name: str, title: str) -> bool:
     return any(hint in title_slug for hint in hints)
 
 
+# Palabras clave de título que descartan una spec aunque sus
+# columnas (genéricas: dominio/anio/valor) coincidan por accidente
+# con otro indicador. P. ej. el DANE publica "Población total -
+# Personas" con exactamente las columnas Dominio/Año/Valor, que de
+# otro modo matchearía ipm_por_dominio vía el alias "valor" -> "ipm"
+# y contaminaría esa tabla con conteos de población en vez de IPM.
+TITLE_EXCLUDES: dict[str, tuple[str, ...]] = {
+    "ipm_por_dominio": ("poblacion_total", "poblacion_",),
+    "proporcion_privaciones": ("poblacion_total", "poblacion_",),
+}
+
+
+def _title_excluded(spec_name: str, title: str) -> bool:
+
+    excludes = TITLE_EXCLUDES.get(spec_name)
+
+    if not excludes:
+        return False
+
+    title_slug = slugify_column(title)
+
+    return any(exclude in title_slug for exclude in excludes)
+
+
 def _resolve_column_source(
     spec: TableSpec,
     header_keys: list[str],
@@ -149,6 +173,9 @@ def match_table(block: DataBlock) -> TableSpec | None:
     candidates = []
 
     for spec in ALL_TABLES:
+
+        if _title_excluded(spec.name, block.title):
+            continue
 
         column_source = _resolve_column_source(spec, header_keys)
 

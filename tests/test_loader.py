@@ -151,6 +151,165 @@ def test_load_tables_updates_value_on_reload():
 
 
 @requires_db
+def test_load_tables_inserts_incidencia_por_sexo_jefe_hogar_with_breakdown():
+
+    geo_name = _unique_geo_name()
+
+    mapped_tables = {
+        "incidencia_por_sexo_jefe_hogar": [
+            {
+                "anio": 2025,
+                "dominio": geo_name,
+                "sexo": "Mujer",
+                "porcentaje": 21.4,
+                "fuente": "TEST",
+                "fecha_extraccion": "2026-08-25T00:00:00+00:00",
+            }
+        ]
+    }
+
+    report = load_tables(mapped_tables)
+
+    assert report["incidencia_por_sexo_jefe_hogar"]["insertadas"] == 1
+    assert report["incidencia_por_sexo_jefe_hogar"]["rechazadas"] == 0
+
+    conn = get_connection()
+
+    try:
+        with conn.cursor() as cursor:
+
+            cursor.execute(
+                """
+                SELECT s.value, i.code, s.breakdown_type, s.breakdown_value
+                FROM ipm_statistic s
+                JOIN indicator i ON i.id = s.indicator_id
+                JOIN geographic_area ga ON ga.id = s.geographic_area_id
+                WHERE ga.name = %s
+                """,
+                (geo_name,),
+            )
+
+            rows = cursor.fetchall()
+
+    finally:
+        conn.close()
+
+    assert len(rows) == 1
+
+    value, code, breakdown_type, breakdown_value = rows[0]
+
+    assert float(value) == 21.4
+    assert (code, breakdown_type, breakdown_value) == (
+        "MPI",
+        "household_head_sex",
+        "Mujer",
+    )
+
+
+@requires_db
+def test_load_tables_inserts_incidencia_por_sexo_persona_with_breakdown():
+
+    geo_name = _unique_geo_name()
+
+    mapped_tables = {
+        "incidencia_por_sexo_persona": [
+            {
+                "anio": 2025,
+                "dominio": geo_name,
+                "sexo": "Hombre",
+                "porcentaje": 18.9,
+                "fuente": "TEST",
+                "fecha_extraccion": "2026-08-25T00:00:00+00:00",
+            }
+        ]
+    }
+
+    report = load_tables(mapped_tables)
+
+    assert report["incidencia_por_sexo_persona"]["insertadas"] == 1
+
+    conn = get_connection()
+
+    try:
+        with conn.cursor() as cursor:
+
+            cursor.execute(
+                """
+                SELECT i.code, s.breakdown_type, s.breakdown_value
+                FROM ipm_statistic s
+                JOIN indicator i ON i.id = s.indicator_id
+                JOIN geographic_area ga ON ga.id = s.geographic_area_id
+                WHERE ga.name = %s
+                """,
+                (geo_name,),
+            )
+
+            code, breakdown_type, breakdown_value = cursor.fetchone()
+
+    finally:
+        conn.close()
+
+    assert (code, breakdown_type, breakdown_value) == (
+        "MPI",
+        "person_sex",
+        "Hombre",
+    )
+
+
+@requires_db
+def test_load_tables_inserts_contribuciones_incidencia_per_dimension_indicator():
+    """
+    contribuciones_incidencia no tiene un indicador fijo: cada
+    dimensión (Educación, Salud, ...) es su propio indicator.code,
+    igual que privaciones_por_hogar.
+    """
+
+    geo_name = _unique_geo_name()
+
+    mapped_tables = {
+        "contribuciones_incidencia": [
+            {
+                "anio": 2025,
+                "dominio": geo_name,
+                "dimension": "Condiciones Educativas",
+                "porcentaje": 30.2,
+                "fuente": "TEST",
+                "fecha_extraccion": "2026-08-25T00:00:00+00:00",
+            }
+        ]
+    }
+
+    report = load_tables(mapped_tables)
+
+    assert report["contribuciones_incidencia"]["insertadas"] == 1
+
+    conn = get_connection()
+
+    try:
+        with conn.cursor() as cursor:
+
+            cursor.execute(
+                """
+                SELECT i.code, i.category, s.breakdown_type, s.breakdown_value
+                FROM ipm_statistic s
+                JOIN indicator i ON i.id = s.indicator_id
+                JOIN geographic_area ga ON ga.id = s.geographic_area_id
+                WHERE ga.name = %s
+                """,
+                (geo_name,),
+            )
+
+            code, category, breakdown_type, breakdown_value = cursor.fetchone()
+
+    finally:
+        conn.close()
+
+    assert code == "CONDICIONES_EDUCATIVAS"
+    assert category == "dimension"
+    assert (breakdown_type, breakdown_value) == ("none", "none")
+
+
+@requires_db
 def test_load_tables_rejects_rows_missing_required_fields():
 
     mapped_tables = {
