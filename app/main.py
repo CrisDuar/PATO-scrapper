@@ -45,6 +45,13 @@ from app.cepal_client import (
     CepalApiError,
 )
 
+from app.cepal_dimensions_export import (
+    build_dataframe as build_cepal_dimensions_dataframe,
+    get_indicator_metadata as get_cepal_indicator_metadata,
+    to_preview_records as cepal_dimensions_preview_records,
+    CepalDimensionsError,
+)
+
 
 
 
@@ -644,11 +651,7 @@ def clean_job(
 def load_clean_job(
     job_id: str,
 ):
-    """
-    Carga a PostgreSQL las sub-tablas ya limpiadas de este job
-    (ejecutar POST /jobs/{job_id}/clean primero). Requiere que
-    DATABASE_URL esté configurada en el .env.
-    """
+
 
     clean_dir = (
         DOWNLOADS_DIR
@@ -686,11 +689,7 @@ def load_clean_job(
 def get_load_log(
     job_id: str,
 ):
-    """
-    Devuelve el historial de cargas a PostgreSQL de este job
-    (uno o más intentos), registrado por POST /jobs/{job_id}/clean/load
-    en datos_limpios/carga_log.json.
-    """
+
 
     log_path = (
         DOWNLOADS_DIR
@@ -805,11 +804,7 @@ def cepal_buscar_indicador(
     nombre: str,
     lang: str = "es",
 ):
-    """
-    Busca en el árbol temático de CEPALSTAT los indicadores cuyo nombre
-    contiene `nombre`, para encontrar el indicator_id que necesitas
-    para POST /cepal/export.
-    """
+    
 
     try:
         resultados = buscar_indicadores(nombre, lang=lang)
@@ -845,10 +840,7 @@ def cepal_buscar_indicador(
 def cepal_export(
     req: CepalExportRequest,
 ):
-    """
-    Descarga los datos de un indicador de CEPALSTAT y los guarda como CSV
-    en el formato: anio,dominio,ipm,fuente,fecha_extraccion,fecha_carga
-    """
+    
 
     try:
         df_crudo = descargar_datos_indicador(
@@ -882,6 +874,61 @@ def cepal_export(
         "filas": len(df_csv),
         "columnas": list(df_csv.columns),
         "muestra": df_csv.head(5).to_dict(orient="records"),
+    }
+
+
+class CepalDimensionsExportRequest(BaseModel):
+
+    indicator_id: int = Field(
+        ...,
+        description=(
+            "ID numérico del indicador en CEPALSTAT "
+            "(usa GET /cepal/buscar-indicador para encontrarlo)."
+        ),
+    )
+
+
+@app.post("/cepal/export-dimensiones")
+def cepal_export_dimensiones(
+    req: CepalDimensionsExportRequest,
+):
+
+    try:
+        df_csv = build_cepal_dimensions_dataframe(req.indicator_id)
+
+    except CepalDimensionsError as exc:
+
+        raise HTTPException(
+            status_code=502,
+            detail=str(exc),
+        )
+
+    if df_csv.empty:
+
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                f"El indicador {req.indicator_id} no devolvió datos."
+            ),
+        )
+
+    export_id = str(uuid.uuid4())
+
+    filename = (
+        f"cepal_indicador_{req.indicator_id}"
+        f"_dimensiones_{export_id}.csv"
+    )
+
+    filepath = CEPAL_EXPORTS_DIR / filename
+
+    df_csv.to_csv(filepath, index=False, encoding="utf-8")
+
+    return {
+        "export_id": export_id,
+        "filename": filename,
+        "filas": len(df_csv),
+        "columnas": list(df_csv.columns),
+        "muestra": cepal_dimensions_preview_records(df_csv),
     }
 
 
