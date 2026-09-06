@@ -975,7 +975,8 @@ class CepalLoadRequest(BaseModel):
         description=(
             "ID del indicador a cargar directo a PostgreSQL. Soportados: "
             "5554 (tabla cepal_deprivation_contribution), "
-            "4079 (tabla cepal_poverty_measure)."
+            "4079 (tabla cepal_poverty_measure), "
+            "5595 (tabla cepal_poverty_by_age)."
         ),
     )
 
@@ -992,6 +993,7 @@ def cepal_load_db(
     Indicadores soportados (ver app/cepal_pg_loader.py):
         5554 -> cepal_deprivation_contribution
         4079 -> cepal_poverty_measure
+        5595 -> cepal_poverty_by_age
     """
 
     try:
@@ -1010,8 +1012,8 @@ def cepal_load_db(
 @app.post("/cepal/load-db/all")
 def cepal_load_db_all():
     """
-    Carga a PostgreSQL TODOS los indicadores soportados (5554 y 4079) en
-    una sola llamada. Si alguno falla, sigue con el resto y reporta el
+    Carga a PostgreSQL TODOS los indicadores soportados (5554, 4079 y 5595)
+    en una sola llamada. Si alguno falla, sigue con el resto y reporta el
     error puntual en 'errores' en vez de abortar todo.
     """
 
@@ -1068,6 +1070,15 @@ def cepal_export_download(
         media_type="text/csv",
     )
 
+
+@app.get("/health")
+def health():
+
+    return {
+        "status": "ok",
+        "app": APP_NAME,
+        "version": APP_VERSION,
+    }
 
 @app.get("/health")
 def health():

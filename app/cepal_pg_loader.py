@@ -1,4 +1,3 @@
-
 from __future__ import annotations
 
 import os
@@ -19,6 +18,12 @@ from app.cepal_dimensions_export import (
 class CepalLoadError(Exception):
     """Error al cargar datos de CEPALSTAT a PostgreSQL."""
 
+
+# indicator_id -> configuración de carga.
+#
+# "dimension_map" traduce el NOMBRE DE DIMENSIÓN tal como lo describe
+# CEPALSTAT (clave) a la columna de la tabla destino (valor). El orden de
+# este dict determina el orden de las columnas en el INSERT.
 INDICATOR_TABLE_CONFIG: dict[int, dict[str, Any]] = {
     5554: {
         "table": "cepal_deprivation_contribution",
@@ -37,9 +42,19 @@ INDICATOR_TABLE_CONFIG: dict[int, dict[str, Any]] = {
             "Multidimensional poverty measures": "measure",
         },
     },
+    5595: {
+        "table": "cepal_poverty_by_age",
+        "dimension_map": {
+            "Country__ESTANDAR": "country",
+            "Geographical area": "geographical_area",
+            "Years__ESTANDAR": "period",
+            "Age_IPM": "age_group",
+        },
+    },
 }
 
-
+# Columnas destino que son INTEGER en Postgres pero vienen como texto desde
+# CEPALSTAT (el nombre del miembro de la dimensión de años, ej. "2008").
 _INTEGER_COLUMNS = {"period"}
 
 
@@ -54,7 +69,10 @@ def _get_connection():
             "de cargar datos a PostgreSQL."
         )
 
-
+    # Parseamos nosotros mismos la URL (en vez de pasarle el string crudo a
+    # psycopg2/libpq) para poder dar un mensaje de error entendible si el
+    # formato está mal armado -- por ejemplo, si el password tiene un "@",
+    # ":" o "/" sin URL-encodear, o si quedaron dos hosts pegados por error.
     try:
         parsed = urlparse(dsn)
 
@@ -79,11 +97,14 @@ def _get_connection():
             "password": unquote(parsed.password) if parsed.password else None,
         }
 
+        # Reenviamos cualquier parámetro extra de la query string
+        # (?sslmode=disable, ?connect_timeout=10, etc.) tal cual a psycopg2.
         conn_kwargs.update(dict(parse_qsl(parsed.query)))
 
     except ValueError as exc:
 
-
+        # Mostramos el DSN con el password enmascarado para poder
+        # depurarlo sin filtrar la contraseña en logs/respuestas.
         safe_dsn = dsn
         if parsed.password:
             safe_dsn = dsn.replace(parsed.password, "***")
@@ -109,7 +130,11 @@ def _get_connection():
 
 
 def _clean_optional(value: Any) -> Any:
-
+    """
+    Convierte cadenas vacías a None (NULL). CEPALSTAT a veces devuelve ""
+    en vez de null para campos como iso3 o notes_ids cuando no aplican
+    (por ejemplo, promedios regionales sin iso3 de país).
+    """
 
     if value is None:
         return None
@@ -123,7 +148,11 @@ def _clean_optional(value: Any) -> Any:
 def _build_rows_for_indicator(
     indicator_id: int,
 ) -> tuple[list[str], list[tuple]]:
-
+    """
+    Descarga y mapea el indicador según su configuración en
+    INDICATOR_TABLE_CONFIG, devolviendo (columnas, filas) listas para
+    insertar con execute_values.
+    """
 
     config = INDICATOR_TABLE_CONFIG.get(indicator_id)
 
@@ -215,7 +244,11 @@ def _build_rows_for_indicator(
 
 
 def load_indicator_to_postgres(indicator_id: int) -> dict[str, Any]:
-
+    """
+    Descarga el indicador dado desde CEPALSTAT y lo inserta directamente en
+    la tabla de Postgres correspondiente (según INDICATOR_TABLE_CONFIG),
+    sin generar ningún archivo CSV intermedio.
+    """
 
     config = INDICATOR_TABLE_CONFIG.get(indicator_id)
 
