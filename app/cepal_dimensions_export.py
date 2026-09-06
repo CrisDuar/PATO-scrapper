@@ -1,3 +1,8 @@
+"""
+Endpoints públicos usados:
+    GET /indicator/{id}/data
+    GET /indicator/{id}/dimensions
+"""
 
 from __future__ import annotations
 
@@ -77,7 +82,7 @@ def _fetch_dimensions(indicator_id: int) -> list[dict]:
 def _build_member_index(
     dimensions: list[dict],
 ) -> dict[int, dict[int, str]]:
-    """Por cada dimensión, arma un mapa id de miembro -> nombre."""
+
 
     index: dict[int, dict[int, str]] = {}
 
@@ -97,8 +102,7 @@ def _resolve_dimension_columns(
     first_row: dict[str, Any],
     dimensions: list[dict],
 ) -> list[tuple[int, str, str]]:
-
-
+    
     columns: list[tuple[int, str, str]] = []
 
     seen: set[int] = set()
@@ -157,7 +161,7 @@ def _resolve_member_label(
     return member_id
 
 
-def build_dataframe(indicator_id: int) -> pd.DataFrame:
+def _build_records(indicator_id: int) -> list[dict[str, Any]]:
 
 
     data_payload = _fetch_data(indicator_id)
@@ -171,10 +175,7 @@ def build_dataframe(indicator_id: int) -> pd.DataFrame:
     member_index = _build_member_index(dimensions)
 
     if not rows:
-
-        return pd.DataFrame(
-            columns=["value", "source_id", "notes_ids", "iso3"]
-        )
+        return []
 
     dim_columns = _resolve_dimension_columns(rows[0], dimensions)
 
@@ -198,10 +199,26 @@ def build_dataframe(indicator_id: int) -> pd.DataFrame:
 
         records.append(record)
 
-    columns_order = (
-        ["value", "source_id", "notes_ids", "iso3"]
-        + [label for _, _, label in dim_columns]
-    )
+    return records
+
+
+def build_records(indicator_id: int) -> list[dict[str, Any]]:
+
+    return _build_records(indicator_id)
+
+
+def build_dataframe(indicator_id: int) -> pd.DataFrame:
+
+
+    records = _build_records(indicator_id)
+
+    if not records:
+
+        return pd.DataFrame(
+            columns=["value", "source_id", "notes_ids", "iso3"]
+        )
+
+    columns_order = list(records[0].keys())
 
     return pd.DataFrame.from_records(records, columns=columns_order)
 
@@ -220,7 +237,6 @@ def to_preview_records(df: pd.DataFrame, n: int = 5) -> list[dict]:
 
 
 def get_indicator_metadata(indicator_id: int) -> dict:
-
 
     payload = _fetch_data(indicator_id)
 

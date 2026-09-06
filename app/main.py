@@ -52,6 +52,12 @@ from app.cepal_dimensions_export import (
     CepalDimensionsError,
 )
 
+from app.cepal_pg_loader import (
+    load_indicator_to_postgres,
+    INDICATOR_TABLE_CONFIG as CEPAL_PG_TABLE_CONFIG,
+    CepalLoadError,
+)
+
 
 
 
@@ -651,7 +657,11 @@ def clean_job(
 def load_clean_job(
     job_id: str,
 ):
-
+    """
+    Carga a PostgreSQL las sub-tablas ya limpiadas de este job
+    (ejecutar POST /jobs/{job_id}/clean primero). Requiere que
+    DATABASE_URL esté configurada en el .env.
+    """
 
     clean_dir = (
         DOWNLOADS_DIR
@@ -689,7 +699,11 @@ def load_clean_job(
 def get_load_log(
     job_id: str,
 ):
-
+    """
+    Devuelve el historial de cargas a PostgreSQL de este job
+    (uno o más intentos), registrado por POST /jobs/{job_id}/clean/load
+    en datos_limpios/carga_log.json.
+    """
 
     log_path = (
         DOWNLOADS_DIR
@@ -804,7 +818,11 @@ def cepal_buscar_indicador(
     nombre: str,
     lang: str = "es",
 ):
-    
+    """
+    Busca en el árbol temático de CEPALSTAT los indicadores cuyo nombre
+    contiene `nombre`, para encontrar el indicator_id que necesitas
+    para POST /cepal/export.
+    """
 
     try:
         resultados = buscar_indicadores(nombre, lang=lang)
@@ -840,7 +858,10 @@ def cepal_buscar_indicador(
 def cepal_export(
     req: CepalExportRequest,
 ):
-    
+    """
+    Descarga los datos de un indicador de CEPALSTAT y los guarda como CSV
+    en el formato: anio,dominio,ipm,fuente,fecha_extraccion,fecha_carga
+    """
 
     try:
         df_crudo = descargar_datos_indicador(
@@ -892,6 +913,21 @@ class CepalDimensionsExportRequest(BaseModel):
 def cepal_export_dimensiones(
     req: CepalDimensionsExportRequest,
 ):
+    """
+    Descarga los datos de CUALQUIER indicador de CEPALSTAT junto con sus
+    dimensiones (GET /indicator/{id}/data y GET /indicator/{id}/dimensions),
+    y genera un CSV genérico donde cada columna "dim_<id>" se reemplaza por
+    el nombre de su dimensión, y cada id de miembro por su nombre legible.
+
+    A diferencia de POST /cepal/export (que arma el formato fijo
+    anio,dominio,ipm,fuente,...), este endpoint no asume ningún esquema
+    particular: conserva todas las dimensiones del indicador tal como
+    vienen descritas en CEPALSTAT, en el orden en que la API las declara.
+
+    El CSV resultante queda en la misma carpeta que POST /cepal/export, así
+    que se descarga con el mismo endpoint ya existente:
+    GET /cepal/export/{filename}/download
+    """
 
     try:
         df_csv = build_cepal_dimensions_dataframe(req.indicator_id)
@@ -929,6 +965,83 @@ def cepal_export_dimensiones(
         "filas": len(df_csv),
         "columnas": list(df_csv.columns),
         "muestra": cepal_dimensions_preview_records(df_csv),
+    }
+
+
+class CepalLoadRequest(BaseModel):
+
+    indicator_id: int = Field(
+        ...,
+        description=(
+            "ID del indicador a cargar directo a PostgreSQL. Soportados: "
+            "5554 (tabla cepal_deprivation_contribution), "
+            "4079 (tabla cepal_poverty_measure)."
+        ),
+    )
+
+
+@app.post("/cepal/load-db")
+def cepal_load_db(
+    req: CepalLoadRequest,
+):
+    """
+    Descarga el indicador de CEPALSTAT (data + dimensions) y lo inserta
+    DIRECTAMENTE en la tabla de PostgreSQL correspondiente, sin generar
+    ningún CSV intermedio. Requiere DATABASE_URL configurada en el .env.
+
+    Indicadores soportados (ver app/cepal_pg_loader.py):
+        5554 -> cepal_deprivation_contribution
+        4079 -> cepal_poverty_measure
+    """
+
+    try:
+        report = load_indicator_to_postgres(req.indicator_id)
+
+    except CepalLoadError as exc:
+
+        raise HTTPException(
+            status_code=422,
+            detail=str(exc),
+        )
+
+    return report
+
+
+@app.post("/cepal/load-db/all")
+def cepal_load_db_all():
+    """
+    Carga a PostgreSQL TODOS los indicadores soportados (5554 y 4079) en
+    una sola llamada. Si alguno falla, sigue con el resto y reporta el
+    error puntual en 'errores' en vez de abortar todo.
+    """
+
+    resultados = []
+    errores = []
+
+    for indicator_id in CEPAL_PG_TABLE_CONFIG:
+
+        try:
+            resultados.append(
+                load_indicator_to_postgres(indicator_id)
+            )
+
+        except CepalLoadError as exc:
+
+            errores.append({
+                "indicator_id": indicator_id,
+                "error": str(exc),
+            })
+
+    if errores and not resultados:
+
+        raise HTTPException(
+            status_code=502,
+            detail=errores,
+        )
+
+    return {
+        "cargados": resultados,
+        "errores": errores,
     }
 
 
