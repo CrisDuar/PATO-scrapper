@@ -10,10 +10,14 @@ import psycopg2
 from app.cleaner.db import (
     get_connection,
     get_or_create_geographic_area,
+    get_or_create_geographic_area_by_code,
     get_or_create_indicator,
+    insert_household_records,
     transaction,
+    upsert_household_deprivations,
     upsert_ipm_statistics,
 )
+from app.cleaner.household_mapper import row_to_household
 from app.cleaner.schema import ALL_TABLES, ColumnSpec
 from app.cleaner.star_schema_mapper import get_star_mapping, row_to_statistic
 
@@ -36,6 +40,12 @@ LOADABLE_TABLES = (
     "incidencia_por_sexo_jefe_hogar",
     "incidencia_por_sexo_persona",
 )
+
+# dashboard_02 no se carga al esquema estrella (geographic_area /
+# indicator / ipm_statistic) sino al esquema normalizado de
+# microdato: household_record / household_deprivation (ver
+# household_mapper.py y la vista de referencia "Base de hogares").
+HOUSEHOLD_TABLE = "dashboard_02"
 
 
 def _coerce_csv_value(value: str, column: ColumnSpec):
@@ -131,9 +141,14 @@ def load_tables(mapped_tables: dict[str, list[dict]]) -> dict:
 
                     report[table_name] = _load_table(cursor, table_name, rows)
 
+                report[HOUSEHOLD_TABLE] = _load_household_table(
+                    cursor,
+                    mapped_tables.get(HOUSEHOLD_TABLE, []),
+                )
+
         for spec in ALL_TABLES:
 
-            if spec.name in LOADABLE_TABLES:
+            if spec.name in LOADABLE_TABLES or spec.name == HOUSEHOLD_TABLE:
                 continue
 
             rows = mapped_tables.get(spec.name, [])
@@ -158,7 +173,7 @@ def load_tables(mapped_tables: dict[str, list[dict]]) -> dict:
                 "rechazadas": len(mapped_tables.get(table_name, [])),
                 "error": str(exc),
             }
-            for table_name in LOADABLE_TABLES
+            for table_name in (*LOADABLE_TABLES, HOUSEHOLD_TABLE)
         }
 
     finally:
@@ -243,6 +258,140 @@ def _load_table(cursor, table_name: str, rows: list[dict]) -> dict:
     inserted = upsert_ipm_statistics(cursor, resolved_rows)
 
     return {"insertadas": inserted, "rechazadas": rejected}
+
+
+def _load_household_table(cursor, rows: list[dict]) -> dict:
+    """
+    Carga dashboard_02 (perfiles de hogar del microdato del DANE) al
+    esquema normalizado household_record / household_deprivation. A
+    diferencia de _load_table, cada fila requiere resolver dos
+    niveles de geographic_area (región -> departamento, vía
+    parent_id) y produce N filas de household_deprivation por hogar
+    (una por variable de privación presente).
+
+    Solo hay 39 áreas geográficas posibles (6 regiones + 33
+    departamentos) y 15 indicadores de privación fijos, así que se
+    resuelven una sola vez y se cachean en memoria — sin esto, un
+    archivo de ~18.700 hogares dispara cientos de miles de
+    round-trips redundantes a la base de datos (uno por privación por
+    hogar) para resolver siempre los mismos 15 códigos.
+    """
+
+    if not rows:
+        return {"insertadas": 0, "rechazadas": 0}
+
+    rejected = 0
+
+    geo_cache: dict[tuple[str, str], str] = {}
+
+    indicator_cache: dict[str, str] = {}
+
+    households: list[dict] = []
+
+    for row in rows:
+
+        household = row_to_household(row)
+
+        if household is None:
+            rejected += 1
+            continue
+
+        households.append(household)
+
+    # Fase 1: resolver geographic_area (región/departamento) e
+    # indicator una sola vez por código distinto, no por hogar.
+    for household in households:
+
+        region_id = None
+
+        if household["region_code"] is not None:
+
+            region_key = ("region", household["region_code"])
+
+            region_id = geo_cache.get(region_key)
+
+            if region_id is None:
+
+                region_id = get_or_create_geographic_area_by_code(
+                    cursor,
+                    level="region",
+                    official_code=household["region_code"],
+                    name=household["region_name"],
+                )
+
+                geo_cache[region_key] = region_id
+
+        departamento_key = ("departamento", household["departamento_code"])
+
+        departamento_id = geo_cache.get(departamento_key)
+
+        if departamento_id is None:
+
+            departamento_id = get_or_create_geographic_area_by_code(
+                cursor,
+                level="departamento",
+                official_code=household["departamento_code"],
+                name=household["departamento_name"],
+                parent_id=region_id,
+            )
+
+            geo_cache[departamento_key] = departamento_id
+
+        household["_geographic_area_id"] = departamento_id
+
+        for deprivation in household["deprivations"]:
+
+            indicator_code = deprivation["indicator_code"]
+
+            if indicator_code in indicator_cache:
+                continue
+
+            indicator_cache[indicator_code] = get_or_create_indicator(
+                cursor,
+                code=indicator_code,
+                name=deprivation["indicator_name"],
+                category=deprivation["indicator_category"],
+            )
+
+    # Fase 2: insertar todos los household_record en un solo batch
+    # (sin buscar coincidencias previas, ver insert_household_records)
+    # y usar los ids devueltos, en el mismo orden, para construir las
+    # filas de household_deprivation.
+    household_record_ids = insert_household_records(
+        cursor,
+        [
+            {
+                "geographic_area_id": household["_geographic_area_id"],
+                "period": household["period"],
+                "household_size": household["household_size"],
+                "ipm_value": household["ipm_value"],
+                "is_poor": household["is_poor"],
+                "source": household["source"],
+                "extracted_at": household["extracted_at"],
+            }
+            for household in households
+        ],
+    )
+
+    all_deprivation_rows = [
+        {
+            "household_record_id": household_record_id,
+            "indicator_id": indicator_cache[deprivation["indicator_code"]],
+            "has_deprivation": deprivation["has_deprivation"],
+        }
+        for household, household_record_id in zip(households, household_record_ids)
+        for deprivation in household["deprivations"]
+    ]
+
+    inserted_deprivations = upsert_household_deprivations(
+        cursor, all_deprivation_rows
+    )
+
+    return {
+        "insertadas": len(household_record_ids),
+        "rechazadas": rejected,
+        "privaciones_insertadas": inserted_deprivations,
+    }
 
 
 def _write_load_log(clean_dir: Path, job_id: str | None, report: dict) -> Path:

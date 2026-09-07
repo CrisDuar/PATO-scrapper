@@ -1,3 +1,4 @@
+import re
 import scrapy
 
 from urllib.parse import (
@@ -41,6 +42,17 @@ from app.scraper.pipelines.files_pipeline import (
 )
 
 
+
+
+# Extrae cadenas entrecomilladas de un atributo onclick, p. ej.
+# onclick="mostrarModal('archivo.zip', 'https://host/download/24591')"
+# produce ['archivo.zip', 'https://host/download/24591']. Se usa para
+# encontrar tanto la URL de descarga real como el nombre de archivo
+# declarado, porque en portales tipo NADA la URL final (.../download/24591)
+# no siempre trae la extensión en el path.
+ONCLICK_STRING_PATTERN = re.compile(
+    r"""['"]([^'"]+)['"]"""
+)
 
 
 class DataFileItem(scrapy.Item):
@@ -431,12 +443,112 @@ class IPMSpider(scrapy.Spider):
                     },
                 )
 
+        # Algunos portales (p. ej. NADA, usado por
+        # microdatos.dane.gov.co) no ponen el enlace de descarga en un
+        # <a href>, sino en un atributo onclick de un <input>/<button>
+        # que abre un modal, p. ej.:
+        # onclick="mostrarModal('archivo.zip', 'https://.../download/24591')".
+        # Sin esto, esos archivos son invisibles para el
+        # extractor de enlaces basado en <a>.
+
+        for element in response.css("[onclick]"):
+
+            onclick = element.attrib.get(
+                "onclick",
+                "",
+            )
+
+            strings = [
+                match.group(1).strip()
+                for match in ONCLICK_STRING_PATTERN.finditer(
+                    onclick
+                )
+            ]
+
+            candidate_url = next(
+                (
+                    value
+                    for value in strings
+                    if value.startswith(
+                        ("http://", "https://")
+                    )
+                ),
+                None,
+            )
+
+            if not candidate_url:
+                continue
+
+            url = normalize_url(
+                response.url,
+                candidate_url,
+            )
+
+            if not url:
+                continue
+
+            if not is_same_domain(
+                url,
+                self.allowed_domains,
+            ):
+
+                continue
+
+            # El nombre de archivo declarado (p. ej.
+            # 'BDATOS-IPM-2025.zip') suele venir como otro argumento
+            # de la misma llamada; se usa para reconocer y nombrar el
+            # archivo cuando la URL de descarga no trae extensión en
+            # el path (p. ej. .../download/24591).
+            filename_hint = next(
+                (
+                    value
+                    for value in strings
+                    if value != candidate_url
+                    and self.is_file(value)
+                ),
+                None,
+            )
+
+            if not (
+                self.is_file(url)
+                or filename_hint
+            ):
+
+                continue
+
+            link_text = " ".join(
+                element.css(
+                    "::attr(title)"
+                ).getall()
+                + element.css(
+                    "::attr(alt)"
+                ).getall()
+            ).strip()
+
+            if filename_hint:
+
+                # El score se calcula sobre `url` (la URL de
+                # descarga real), que para estos botones-modal suele
+                # no traer extensión ni contexto en el path (p. ej.
+                # .../download/24591); se agrega el nombre declarado
+                # al link_text para que calculate_file_score() pueda
+                # evaluar el archivo por su nombre real.
+                link_text = f"{link_text} {filename_hint}".strip()
+
+            yield from self.process_file(
+                url,
+                link_text,
+                response.url,
+                filename_hint=filename_hint,
+            )
+
 
     def process_file(
         self,
         url: str,
         link_text: str,
         source_page: str,
+        filename_hint: str | None = None,
     ):
 
         score = calculate_file_score(
@@ -446,7 +558,7 @@ class IPMSpider(scrapy.Spider):
     source_page=source_page,
 )
 
-        filename = get_filename(
+        filename = filename_hint or get_filename(
             url
         )
 

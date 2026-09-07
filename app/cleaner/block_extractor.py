@@ -271,6 +271,7 @@ def extract_blocks_from_sheet(
     rows: list[tuple],
     sheet_name: str,
     source_file: str,
+    squeeze_merged: bool = True,
 ) -> list[DataBlock]:
     """
     Recorre una hoja fila por fila detectando el patrón:
@@ -279,6 +280,13 @@ def extract_blocks_from_sheet(
     [filas de datos] y devuelve un DataBlock por cada tabla
     encontrada. Tablas en formato ancho (un año por columna) se
     despivotan a formato largo (una fila por año).
+
+    `squeeze_merged` colapsa repeticiones consecutivas idénticas en
+    una fila (ver `_squeeze_merged_row`); solo tiene sentido para
+    hojas de Excel, donde ese patrón indica una celda fusionada. Un
+    CSV plano no tiene celdas fusionadas, así que valores repetidos
+    consecutivos (p. ej. varias privaciones en 0, o varios 'NA'
+    seguidos) son datos reales y deben conservarse tal cual.
     """
 
     blocks: list[DataBlock] = []
@@ -334,7 +342,10 @@ def extract_blocks_from_sheet(
 
     for row in rows:
 
-        trimmed = _squeeze_merged_row(_trim_row(row))
+        trimmed = _trim_row(row)
+
+        if squeeze_merged:
+            trimmed = _squeeze_merged_row(trimmed)
 
         if _row_is_empty(trimmed):
 
@@ -617,4 +628,5 @@ def extract_blocks_from_csv(path: str) -> list[DataBlock]:
         rows,
         sheet_name="csv",
         source_file=path,
+        squeeze_merged=False,
     )

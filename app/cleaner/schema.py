@@ -171,10 +171,33 @@ DASHBOARD_02_HOGARES = TableSpec(
         "ipm",
         "pobre",
     ),
-    required_header_keys=("anio", "region", "departamento", "ipm", "pobre"),
+    required_header_keys=("region", "departamento", "ipm", "pobre"),
     header_key_aliases={
+        # Encabezados reales del microdato de hogares del DANE
+        # (BDATOS-IPM-<año>.zip, hoja "HOGARES (DEPARTAMENTAL) <año>"),
+        # publicado en microdatos.dane.gov.co. No trae columna de año
+        # confiable (PERIODO viene casi siempre en NA); el año se
+        # infiere del título del bloque/archivo, igual que en
+        # contribuciones_incidencia.
         "ano": "anio",
-        "personas_que_habitan_ese_hogar": "personas_hogar",
+        "personas": "personas_hogar",
+        "logro_educativo": "priv_bajo_logro_educativo",
+        "analfabetismo": "priv_analfabetismo",
+        "inasistencia_escolar": "priv_inasistencia_escolar",
+        "rezago_escolar": "priv_rezago_escolar",
+        "atencion_integral": "priv_atencion_primera_infancia",
+        "trabajo_infantil": "priv_trabajo_infantil",
+        "aseguramiento_salud": "priv_no_aseguramiento_salud",
+        "barreras_acceso_salud": "priv_barreras_acceso_salud",
+        "desempleo_larga_duracion": "priv_desempleo_larga_duracion",
+        "empleo_formal": "priv_tasa_empleo_formal",
+        "acueducto": "priv_no_acceso_agua_mejorada",
+        "alcantarillado": "priv_inadecuada_eliminacion_excretas",
+        "pisos": "priv_material_inadecuado_pisos",
+        "paredes": "priv_material_inadecuado_paredes",
+        "hacinamiento": "priv_hacinamiento_critico",
+        # Alias heredados por si algún anexo publica encabezados en
+        # español largo en vez de los nombres cortos del microdato.
         "privacion_por_bajo_logro_educativo": "priv_bajo_logro_educativo",
         "privacion_por_analfabetismo": "priv_analfabetismo",
         "privacion_por_inasistencia_escolar": "priv_inasistencia_escolar",
@@ -190,6 +213,7 @@ DASHBOARD_02_HOGARES = TableSpec(
         "privacion_por_inadecuado_material_de_pisos": "priv_material_inadecuado_pisos",
         "privacion_por_inadecuado_material_de_paredes_exteriores": "priv_material_inadecuado_paredes",
         "privacion_por_hacinamiento_critico": "priv_hacinamiento_critico",
+        "personas_que_habitan_ese_hogar": "personas_hogar",
     },
 )
 
