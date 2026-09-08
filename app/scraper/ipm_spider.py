@@ -535,6 +535,19 @@ class IPMSpider(scrapy.Spider):
                 # evaluar el archivo por su nombre real.
                 link_text = f"{link_text} {filename_hint}".strip()
 
+            # El nombre del recurso descargable suele ser genérico
+            # ("Hogares(Departamental).zip"), sin ninguna palabra
+            # relacionada con el tema buscado, aunque la PÁGINA que
+            # lo aloja sí lo sea (su <title> dice explícitamente de
+            # qué operación estadística se trata). Se agrega el
+            # título de la página al contexto para que
+            # calculate_file_score() no descarte archivos legítimos
+            # solo porque su nombre de archivo es genérico.
+            page_title = response.css("title::text").get(default="")
+
+            if page_title:
+                link_text = f"{link_text} {page_title}".strip()
+
             yield from self.process_file(
                 url,
                 link_text,

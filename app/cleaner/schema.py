@@ -162,16 +162,22 @@ DASHBOARD_02_HOGARES = TableSpec(
         ColumnSpec("ipm", "float"),
         ColumnSpec("pobre", "boolean"),
     ),
+    # "region" queda fuera de la clave natural (a diferencia de
+    # "departamento") porque el microdato 2024 no la trae: si
+    # estuviera aquí, _dedupe_rows descartaría todas sus filas por
+    # tener ese campo en None.
     natural_key=(
         "anio",
-        "region",
         "departamento",
         "personas_hogar",
         *PRIVACION_COLUMNS,
         "ipm",
         "pobre",
     ),
-    required_header_keys=("region", "departamento", "ipm", "pobre"),
+    # "region" no está en required_header_keys porque el microdato
+    # 2024 solo trae DEPARTAMENTO (sin desagregación de región); ver
+    # household_mapper.row_to_household, que ya maneja region_code=None.
+    required_header_keys=("departamento", "ipm", "pobre"),
     header_key_aliases={
         # Encabezados reales del microdato de hogares del DANE
         # (BDATOS-IPM-<año>.zip, hoja "HOGARES (DEPARTAMENTAL) <año>"),
@@ -183,7 +189,13 @@ DASHBOARD_02_HOGARES = TableSpec(
         "personas": "personas_hogar",
         "logro_educativo": "priv_bajo_logro_educativo",
         "analfabetismo": "priv_analfabetismo",
+        # "alfabetismo" (sin el prefijo "an-") es como el DANE nombró
+        # esta misma variable en los microdatos de hogares 2010-2023;
+        # a partir de 2024 el campo se llama "analfabetismo".
+        "alfabetismo": "priv_analfabetismo",
         "inasistencia_escolar": "priv_inasistencia_escolar",
+        # Typo de origen en el microdato 2024 ("inansistencia").
+        "inansistencia_escolar": "priv_inasistencia_escolar",
         "rezago_escolar": "priv_rezago_escolar",
         "atencion_integral": "priv_atencion_primera_infancia",
         "trabajo_infantil": "priv_trabajo_infantil",
