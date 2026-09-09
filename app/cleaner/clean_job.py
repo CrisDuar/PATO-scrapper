@@ -1,15 +1,20 @@
+import logging
+
 from datetime import datetime, timezone
 from pathlib import Path
 
 from app.cleaner.block_extractor import (
     DataBlock,
     extract_blocks_from_csv,
+    extract_blocks_from_legacy_xls,
     extract_blocks_from_workbook,
 )
 from app.cleaner.exporter import export_tables
 from app.cleaner.normalizer import normalize_blocks
 from app.cleaner.table_mapper import map_blocks
 
+
+logger = logging.getLogger("cleaner.clean_job")
 
 SUPPORTED_EXTENSIONS = {".xlsx", ".xls", ".csv"}
 
@@ -25,10 +30,25 @@ def _extract_blocks_from_file(path: Path) -> list[DataBlock]:
         if extension == ".csv":
             return extract_blocks_from_csv(str(path))
 
-        if extension in {".xlsx", ".xls"}:
+        if extension == ".xlsx":
             return extract_blocks_from_workbook(str(path))
 
+        # .xls es el formato binario legacy (Excel 97-2003); openpyxl
+        # no puede leerlo (lanza InvalidFileException). Varios anexos
+        # históricos del DANE (2019-2021) siguen publicándose en este
+        # formato.
+        if extension == ".xls":
+            return extract_blocks_from_legacy_xls(str(path))
+
     except Exception:
+
+        logger.warning(
+            "No se pudo extraer bloques de '%s' (%s)",
+            path.name,
+            extension,
+            exc_info=True,
+        )
+
         return []
 
     return []

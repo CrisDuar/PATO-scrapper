@@ -584,6 +584,85 @@ def _forward_fill_orphan_first_column(rows: list[list]) -> None:
             row[0] = previous[0]
 
 
+def _read_xls_sheet_rows_with_merges(sheet) -> list[list]:
+    """
+    Equivalente a _read_sheet_rows_with_merges() pero para el formato
+    binario legacy .xls (anexos del DANE de 2019-2021), leído con
+    xlrd en vez de openpyxl — mismo criterio de forward-fill vertical
+    de celdas fusionadas que solo cubren filas de datos.
+    """
+
+    rows = [
+        [
+            cell.value if cell.value != "" else None
+            for cell in sheet.row(row_index)
+        ]
+        for row_index in range(sheet.nrows)
+    ]
+
+    for merged_range in sheet.merged_cells:
+
+        row_lo, row_hi, col_lo, col_hi = merged_range
+
+        spans_one_column = (col_hi - col_lo) == 1
+
+        spans_multiple_rows = (row_hi - row_lo) > 1
+
+        if not (spans_one_column and spans_multiple_rows):
+            continue
+
+        covered_rows = range(row_lo, row_hi)
+
+        all_rows_are_data = all(
+            any(
+                isinstance(cell, (int, float))
+                for cell in rows[row_index]
+            )
+            for row_index in covered_rows
+        )
+
+        if not all_rows_are_data:
+            continue
+
+        value = rows[row_lo][col_lo]
+
+        for row_index in covered_rows:
+            rows[row_index][col_lo] = value
+
+    _forward_fill_orphan_first_column(rows)
+
+    return rows
+
+
+def extract_blocks_from_legacy_xls(path: str) -> list[DataBlock]:
+    """
+    Extrae bloques de un archivo .xls binario legacy (formato Excel
+    97-2003), que openpyxl no puede leer. Usa xlrd, la única librería
+    mantenida que sigue soportando ese formato (desde xlrd 2.0 ya no
+    soporta .xlsx, así que ambas rutas son mutuamente excluyentes).
+    """
+
+    import xlrd
+
+    workbook = xlrd.open_workbook(path, formatting_info=False)
+
+    blocks: list[DataBlock] = []
+
+    for sheet in workbook.sheets():
+
+        rows = _read_xls_sheet_rows_with_merges(sheet)
+
+        blocks.extend(
+            extract_blocks_from_sheet(
+                rows,
+                sheet_name=sheet.name,
+                source_file=path,
+            )
+        )
+
+    return blocks
+
+
 def extract_blocks_from_workbook(path: str) -> list[DataBlock]:
 
     workbook = openpyxl.load_workbook(

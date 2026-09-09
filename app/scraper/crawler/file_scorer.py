@@ -210,13 +210,20 @@ def calculate_file_score(
 
     for statistic in other_statistics:
 
-        if statistic in filename_normalized:
+        # Límites de palabra (\b): sin esto, códigos cortos de otras
+        # encuestas del DANE aparecen como substring dentro de
+        # palabras legítimas del IPM (p. ej. "ens" dentro de
+        # "pmultidimENSional", "ica" dentro de "estadISTICAs"),
+        # penalizando -300 y descartando archivos correctos.
+        pattern = r"\b" + re.escape(statistic) + r"\b"
+
+        if re.search(pattern, filename_normalized):
             score -= 100
 
-        if statistic in url_normalized:
+        if re.search(pattern, url_normalized):
             score -= 100
 
-        if statistic in source_normalized:
+        if re.search(pattern, source_normalized):
             score -= 100
 
 
