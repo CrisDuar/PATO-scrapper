@@ -139,10 +139,11 @@ INCIDENCIA_POR_SEXO_JEFE_HOGAR = TableSpec(
         ColumnSpec("porcentaje", "float"),
     ),
     natural_key=("anio", "dominio", "sexo"),
-    required_header_keys=("dominio", "sexo_jefe_hogar", "porcentaje"),
+    required_header_keys=("dominio", "sexo", "porcentaje"),
     header_key_aliases={
         "ano": "anio",
         "sexo_jefe_hogar": "sexo",
+        "sexo_persona": "sexo",
         "valor": "porcentaje",
         "principales_dominios": "dominio",
         "regiones": "dominio",

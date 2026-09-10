@@ -301,10 +301,10 @@ def extract_blocks_from_sheet(
 
     current_rows: list[list] = []
 
-    def flush():
+    def flush() -> bool:
 
         if not headers or not current_rows:
-            return
+            return False
 
         final_headers = _fix_blank_characteristic_header(headers)
         final_rows = current_rows
@@ -328,7 +328,7 @@ def extract_blocks_from_sheet(
             )
 
         if not final_rows:
-            return
+            return False
 
         blocks.append(
             DataBlock(
@@ -340,6 +340,8 @@ def extract_blocks_from_sheet(
             )
         )
 
+        return True
+
     for row in rows:
 
         trimmed = _trim_row(row)
@@ -349,7 +351,8 @@ def extract_blocks_from_sheet(
 
         if _row_is_empty(trimmed):
 
-            flush()
+            if flush():
+                pending_title = ""
 
             headers = None
             pending_year_row = None
@@ -375,7 +378,9 @@ def extract_blocks_from_sheet(
         if headers is None or is_title_row or is_new_header_row:
 
             if is_title_row:
-                flush()
+
+                if flush():
+                    pending_title = ""
 
                 new_title = non_empty[0]
 

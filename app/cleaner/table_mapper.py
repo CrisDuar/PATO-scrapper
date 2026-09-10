@@ -71,7 +71,7 @@ def _coerce_value(value, column: ColumnSpec):
 # variable/sexo, ipm/porcentaje) pero se distinguen por contexto.
 TITLE_HINTS: dict[str, tuple[str, ...]] = {
     "incidencia_por_sexo_jefe_hogar": ("jefe_de_hogar", "jefatura"),
-    "incidencia_por_sexo_persona": ("segun_sexo", "por_sexo"),
+    "incidencia_por_sexo_persona": ("sexo_de_la_persona", "segun_sexo_persona"),
     "contribuciones_incidencia": ("contribuci", "incidencia_ajustada"),
     "proporcion_privaciones": ("proporcion_de_privaciones", "intensidad"),
     "privaciones_por_hogar": ("privaciones_por_hogar",),
@@ -99,6 +99,7 @@ def _title_matches(spec_name: str, title: str) -> bool:
 TITLE_EXCLUDES: dict[str, tuple[str, ...]] = {
     "ipm_por_dominio": ("poblacion_total", "poblacion_",),
     "proporcion_privaciones": ("poblacion_total", "poblacion_",),
+    "incidencia_por_sexo_persona": ("jefe_de_hogar", "jefatura"),
 }
 
 
