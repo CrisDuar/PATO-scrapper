@@ -59,19 +59,19 @@ DIVIPOLA_DEPARTAMENTOS: dict[str, str] = {
     "99": "Vichada",
 }
 
-# "Grandes regiones" tradicionales de las encuestas de hogares del
-# DANE (GEIH/pobreza monetaria y multidimensional). A diferencia de
-# DIVIPOLA_DEPARTAMENTOS, esta numeración no viene documentada en el
-# diccionario de variables público del microdato descargado; se deja
-# explícita aquí para que el equipo la confirme/corrija si alguna
-# vez se detecta un dominio mal etiquetado.
+# Variable REGION del diccionario de variables público del microdato
+# IPM del DANE (microdatos.dane.gov.co, catálogo IPM, variable
+# REGION): https://microdatos.dane.gov.co/index.php/catalog/824/variable/F49/V1055?name=REGION
 GRANDES_REGIONES: dict[str, str] = {
-    "1": "Región Atlántica",
-    "2": "Región Oriental",
-    "3": "Región Central",
-    "4": "Región Pacífica",
-    "5": "Bogotá D.C.",
-    "6": "Región Antioquia",
+    "1": "Caribe",
+    "2": "Oriental",
+    "3": "Central",
+    "4": "Pacífica (sin Valle)",
+    "5": "Bogotá",
+    "6": "Antioquia",
+    "7": "Valle del Cauca",
+    "8": "San Andrés y Providencia",
+    "9": "Orinoquía - Amazonía",
 }
 
 
